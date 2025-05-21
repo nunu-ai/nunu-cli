@@ -8,10 +8,7 @@ fn init_sentry() -> Option<sentry::ClientInitGuard> {
     let dsn = match std::env::var("SENTRY_DSN") {
         Ok(dsn) => dsn,
         Err(err) => {
-            debug!(
-                "SENTRY_DSN not set, skipping sentry initialization: {}",
-                err
-            );
+            debug!("SENTRY_DSN not set, skipping sentry initialization: {err}");
             return None;
         }
     };
@@ -36,7 +33,7 @@ fn main() -> anyhow::Result<()> {
     info!("Hello, world!");
 
     let sum = add_safe(5, 7)?;
-    info!("5 + 7 = {}", sum);
+    info!("5 + 7 = {sum}");
 
     Ok(())
 }
