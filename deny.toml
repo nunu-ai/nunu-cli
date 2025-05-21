@@ -1,0 +1,15 @@
+[licenses]
+allow = [
+  "BSD-3-Clause",
+  "ISC",
+  "MIT",
+  "Apache-2.0",
+  "Unicode-3.0",
+  "CDLA-Permissive-2.0",
+]
+private = { ignore = true }
+
+[bans]
+deny = [
+  "openssl-sys", # no openssl.
+]

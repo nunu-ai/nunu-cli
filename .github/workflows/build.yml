@@ -1,0 +1,16 @@
+name: Build
+
+on: push
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        os: [[self-hosted, nix, macOS], [self-hosted, nix, Linux]]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        run: om ci
+      - name: Upload to cache
+        run: nunu-upload-to-cache
