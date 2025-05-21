@@ -36,8 +36,7 @@
         toolchain =
           with fenix.packages.${system};
           combine [
-            minimal.rustc
-            minimal.cargo
+            default.toolchain
             targets.x86_64-pc-windows-gnu.latest.rust-std
           ];
 
