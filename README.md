@@ -20,6 +20,9 @@ Rust project template with error handling, logging, and monitoring pre-configure
 - [direnv](https://direnv.net/) (optional, for automatic environment loading)
 - [uv](https://github.com/astral-sh/uv) (for installing pre-commit)
 
+### Setting up VS Code
+- Change the linter to clippy [Clippy in VS code](https://code.visualstudio.com/docs/languages/rust#_linting)
+
 ### Getting Started
 
 ```sh
