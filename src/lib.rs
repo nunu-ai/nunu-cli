@@ -6,6 +6,11 @@ pub enum RustTemplateError {
     CannotAddSeven,
 }
 
+/// Add two numbers
+///
+/// # Errors
+///
+/// Just don't add 7 :)
 pub fn add_safe(a: i32, b: i32) -> Result<i32, RustTemplateError> {
     if b == 7 {
         return Err(RustTemplateError::CannotAddSeven);

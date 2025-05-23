@@ -176,11 +176,12 @@
 
           # Extra inputs can be added here; cargo and rustc are provided by default.
           packages = [
-            # pkgs.ripgrep
+            pkgs.just
+            pkgs.pre-commit
           ];
 
           shellHook = ''
-            # Additional code to execute when entering devshell
+            pre-commit install > /dev/null
           '';
         };
       }
