@@ -1,34 +1,13 @@
-use thiserror::Error;
+//! Nunu CLI library for uploading build artifacts
 
-#[derive(Error, Debug, PartialEq)]
-pub enum RustTemplateError {
-    #[error("You can't add 7 to something.")]
-    CannotAddSeven,
-}
+pub mod api;
+pub mod config;
+pub mod error;
+pub mod upload;
 
-/// Add two numbers
-///
-/// # Errors
-///
-/// Just don't add 7 :)
-pub fn add_safe(a: i32, b: i32) -> Result<i32, RustTemplateError> {
-    if b == 7 {
-        return Err(RustTemplateError::CannotAddSeven);
-    }
-    Ok(a + b)
-}
+pub use config::Config;
+pub use error::{Error, Result};
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_add_safe() {
-        assert_eq!(add_safe(1, 2), Ok(3));
-    }
-
-    #[test]
-    fn test_add_safe_error() {
-        assert_eq!(add_safe(1, 7), Err(RustTemplateError::CannotAddSeven));
-    }
-}
+// Re-export commonly used types
+pub use api::{BuildPlatform, Client, DeletionPolicy};
+pub use upload::{UploadOptions, upload_file};

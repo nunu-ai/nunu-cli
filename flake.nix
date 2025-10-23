@@ -1,5 +1,5 @@
 {
-  description = "Build a cargo project";
+  description = "nunu.ai CLI for uploading build artifacts";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
@@ -36,9 +36,10 @@
         toolchain =
           with fenix.packages.${system};
           combine [
-            default.toolchain
-            targets.x86_64-pc-windows-gnu.latest.rust-std
+            stable.toolchain
+            stable.rust-src
           ];
+
 
         inherit (pkgs) lib;
 
@@ -56,8 +57,9 @@
               # Add additional build inputs here
             ]
             ++ lib.optionals pkgs.stdenv.isDarwin [
-              # Additional darwin specific inputs can be set here
               pkgs.libiconv
+              pkgs.darwin.apple_sdk.frameworks.Security
+              pkgs.darwin.apple_sdk.frameworks.SystemConfiguration
             ];
 
           # Additional environment variables can be set directly
@@ -70,13 +72,13 @@
 
         # Build the actual crate itself, reusing the dependency
         # artifacts from above.
-        rust-template-crate = craneLib.buildPackage (
+        nunu-cli = craneLib.buildPackage (
           commonArgs
           // {
             inherit cargoArtifacts;
           }
         );
-        rust-template-crate-windows = craneLib.buildPackage (
+        nunu-cli-windows = craneLib.buildPackage (
           commonArgs
           // {
             inherit cargoArtifacts;
@@ -100,7 +102,7 @@
       {
         checks = {
           # Build the crate as part of `nix flake check` for convenience
-          inherit rust-template-crate;
+          inherit nunu-cli;
 
           # Run clippy (and deny all warnings) on the crate source,
           # again, reusing the dependency artifacts from above.
@@ -108,7 +110,7 @@
           # Note that this is done as a separate derivation so that
           # we can block the CI if there are issues here, but not
           # prevent downstream consumers from building our crate by itself.
-          my-crate-clippy = craneLib.cargoClippy (
+          nunu-cli-clippy = craneLib.cargoClippy (
             commonArgs
             // {
               inherit cargoArtifacts;
@@ -116,7 +118,7 @@
             }
           );
 
-          my-crate-doc = craneLib.cargoDoc (
+          nunu-cli-doc = craneLib.cargoDoc (
             commonArgs
             // {
               inherit cargoArtifacts;
@@ -124,30 +126,30 @@
           );
 
           # Check formatting
-          my-crate-fmt = craneLib.cargoFmt {
+          nunu-cli-fmt = craneLib.cargoFmt {
             inherit src;
           };
 
-          my-crate-toml-fmt = craneLib.taploFmt {
+          nunu-cli-toml-fmt = craneLib.taploFmt {
             src = pkgs.lib.sources.sourceFilesBySuffices src [ ".toml" ];
             # taplo arguments can be further customized below as needed
             # taploExtraArgs = "--config ./taplo.toml";
           };
 
           # Audit dependencies
-          my-crate-audit = craneLib.cargoAudit {
+          nunu-cli-audit = craneLib.cargoAudit {
             inherit src advisory-db;
           };
 
           # Audit licenses
-          my-crate-deny = craneLib.cargoDeny {
+          nunu-cli-deny = craneLib.cargoDeny {
             inherit src;
           };
 
           # Run tests with cargo-nextest
           # Consider setting `doCheck = false` on `my-crate` if you do not want
           # the tests to run twice
-          my-crate-nextest = craneLib.cargoNextest (
+          nunu-cli-nextest = craneLib.cargoNextest (
             commonArgs
             // {
               inherit cargoArtifacts;
@@ -159,12 +161,12 @@
         };
 
         packages = {
-          default = rust-template-crate;
-          rust-template-windows = rust-template-crate-windows;
+          default = nunu-cli;
+          windows = nunu-cli-windows;
         };
 
         apps.default = flake-utils.lib.mkApp {
-          drv = rust-template-crate;
+          drv = nunu-cli;
         };
 
         devShells.default = craneLib.devShell {
