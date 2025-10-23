@@ -40,7 +40,6 @@
             stable.rust-src
           ];
 
-
         inherit (pkgs) lib;
 
         craneLib = (crane.mkLib pkgs).overrideToolchain toolchain;
@@ -52,15 +51,21 @@
           strictDeps = true;
           doCheck = false;
 
+          nativeBuildInputs = [
+            pkgs.pkg-config
+          ];
+
           buildInputs =
             [
               # Add additional build inputs here
             ]
             ++ lib.optionals pkgs.stdenv.isDarwin [
               pkgs.libiconv
-              pkgs.darwin.apple_sdk.frameworks.Security
-              pkgs.darwin.apple_sdk.frameworks.SystemConfiguration
             ];
+
+          # Override rustc flags to use default linker instead of lld
+          # This avoids posix_spawnp issues in Nix sandbox with fenix toolchain
+          RUSTFLAGS = "-C link-arg=-fuse-ld=gold";
 
           # Additional environment variables can be set directly
           # MY_CUSTOM_VAR = "some value";
