@@ -50,6 +50,17 @@ opt-level = "z"
 
 # cargo-release configuration
 [package.metadata.release]
+pre-release-hook = [
+  "convco",
+  "changelog",
+  "--unreleased",
+  "{{version}}",
+  "--prefix",
+  "nunu-cli-v",
+  "--skip-empty",
+  "-o",
+  "CHANGELOG.md",
+]
 tag-name = "nunu-cli-v{{version}}"
 tag-message = "chore: release nunu-cli version {{version}}"
 pre-release-commit-message = "chore: release nunu-cli v{{version}}"

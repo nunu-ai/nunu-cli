@@ -37,8 +37,10 @@ jobs:
       - name: Get version
         id: get-version
         run: |
-          if git describe --exact-match --tags HEAD 2>/dev/null; then
-            VERSION=$(git describe --exact-match --tags HEAD | sed 's/nunu-cli-v//')
+          # Check if HEAD has a tag matching our pattern
+          TAG=$(git describe --exact-match --tags HEAD 2>/dev/null || echo "")
+          if [ -n "$TAG" ] && [[ "$TAG" == nunu-cli-v* ]]; then
+            VERSION=$(echo "$TAG" | sed 's/nunu-cli-v//')
             echo "version=$VERSION" >> $GITHUB_OUTPUT
             echo "released=true" >> $GITHUB_OUTPUT
           else
