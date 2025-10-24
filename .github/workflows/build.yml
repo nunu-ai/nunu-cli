@@ -21,6 +21,9 @@ jobs:
       contents: "write"
     runs-on: [self-hosted, nix, Linux]
     needs: [build]
+    outputs:
+      version: ${{ steps.get-version.outputs.version }}
+      released: ${{ steps.get-version.outputs.released }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -31,3 +34,71 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
           nix run .#bump-version
+      - name: Get version
+        id: get-version
+        run: |
+          if git describe --exact-match --tags HEAD 2>/dev/null; then
+            VERSION=$(git describe --exact-match --tags HEAD | sed 's/nunu-cli-v//')
+            echo "version=$VERSION" >> $GITHUB_OUTPUT
+            echo "released=true" >> $GITHUB_OUTPUT
+          else
+            echo "released=false" >> $GITHUB_OUTPUT
+          fi
+
+  post-release-build:
+    if: github.ref == 'refs/heads/main' && needs.release.outputs.released == 'true'
+    strategy:
+      matrix:
+        os: [[self-hosted, nix, macOS], [self-hosted, nix, Linux]]
+        include:
+          - os: [self-hosted, nix, macOS]
+            platform: macos
+            binary: nunu-cli
+          - os: [self-hosted, nix, Linux]
+            platform: linux
+            binary: nunu-cli
+    runs-on: ${{ matrix.os }}
+    needs: [release]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+      - name: Build
+        run: om ci
+      - name: Upload to cache
+        run: nunu-upload-to-cache
+      - name: Prepare artifacts
+        run: |
+          mkdir -p artifacts
+          cp result/bin/${{ matrix.binary }} artifacts/nunu-cli-${{ matrix.platform }}
+          chmod +x artifacts/nunu-cli-${{ matrix.platform }}
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: nunu-cli-${{ matrix.platform }}
+          path: artifacts/nunu-cli-${{ matrix.platform }}
+          retention-days: 30
+
+  create-github-release:
+    if: github.ref == 'refs/heads/main' && needs.release.outputs.released == 'true'
+    permissions:
+      contents: "write"
+    runs-on: [self-hosted, nix, Linux]
+    needs: [release, post-release-build]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: nunu-cli-v${{ needs.release.outputs.version }}
+          name: Release v${{ needs.release.outputs.version }}
+          draft: false
+          prerelease: false
+          files: |
+            artifacts/nunu-cli-linux/nunu-cli-linux
+            artifacts/nunu-cli-macos/nunu-cli-macos
+          generate_release_notes: true
