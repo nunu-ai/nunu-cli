@@ -1,5 +1,12 @@
 # Changelog
 
+## [nunu-cli-v0.1.1](https://github.com/nunu-ai/nunu-cli/compare/nunu-cli-v0.1.0...c37cc834fb812f27683be4bd7586ff57f7e2f9bf) (2025-10-24)
+
+### Fixes
+
+* try different artifact path
+([c37cc83](https://github.com/nunu-ai/nunu-cli/commit/c37cc834fb812f27683be4bd7586ff57f7e2f9bf))
+
 ## nunu-cli-v0.1.0 (2025-10-24)
 
 ### Features
