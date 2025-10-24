@@ -1,0 +1,15 @@
+# Configuration for cargo-release
+# https://github.com/crate-ci/cargo-release/blob/master/docs/reference.md
+
+# Use custom tag name with nunu-cli prefix
+tag-name = "nunu-cli-v{{version}}"
+tag-message = "chore: release nunu-cli version {{version}}"
+
+# Don't publish to crates.io
+publish = false
+
+# Allow releasing from main branch
+allow-branch = ["main"]
+
+# Commit message for version bump
+pre-release-commit-message = "chore: release nunu-cli v{{version}}"
