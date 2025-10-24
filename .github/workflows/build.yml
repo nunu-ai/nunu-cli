@@ -70,7 +70,7 @@ jobs:
       - name: Upload to cache
         run: nunu-upload-to-cache
       - name: Prepare artifacts
-        run: nix run .#release-artifacts
+        run: nix build .#release-artifacts
 
 
   create-github-release:
