@@ -36,7 +36,7 @@
         toolchain =
           with fenix.packages.${system};
           combine [
-            stable.toolchain
+            default.toolchain
             stable.rust-src
           ];
 
@@ -51,9 +51,6 @@
           strictDeps = true;
           doCheck = false;
 
-          nativeBuildInputs = [
-            pkgs.pkg-config
-          ];
 
           buildInputs =
             [
@@ -62,13 +59,6 @@
             ++ lib.optionals pkgs.stdenv.isDarwin [
               pkgs.libiconv
             ];
-
-          # Override rustc flags to use default linker instead of lld
-          # This avoids posix_spawnp issues in Nix sandbox with fenix toolchain
-          RUSTFLAGS = "-C link-arg=-fuse-ld=gold";
-
-          # Additional environment variables can be set directly
-          # MY_CUSTOM_VAR = "some value";
         };
 
         # Build *just* the cargo dependencies, so we can reuse
@@ -83,11 +73,11 @@
             inherit cargoArtifacts;
           }
         );
+
         nunu-cli-windows = craneLib.buildPackage (
           commonArgs
           // {
             inherit cargoArtifacts;
-            CARGO_BUILD_TARGET = "x86_64-pc-windows-gnu";
 
             # fixes issues related to libring
             TARGET_CC = "${pkgs.pkgsCross.mingwW64.stdenv.cc}/bin/${pkgs.pkgsCross.mingwW64.stdenv.cc.targetPrefix}cc";
@@ -107,14 +97,8 @@
       {
         checks = {
           # Build the crate as part of `nix flake check` for convenience
-          inherit nunu-cli;
 
-          # Run clippy (and deny all warnings) on the crate source,
-          # again, reusing the dependency artifacts from above.
-          #
-          # Note that this is done as a separate derivation so that
-          # we can block the CI if there are issues here, but not
-          # prevent downstream consumers from building our crate by itself.
+          # Run clippy (and deny all warnings) on the crate source
           nunu-cli-clippy = craneLib.cargoClippy (
             commonArgs
             // {
@@ -137,8 +121,6 @@
 
           nunu-cli-toml-fmt = craneLib.taploFmt {
             src = pkgs.lib.sources.sourceFilesBySuffices src [ ".toml" ];
-            # taplo arguments can be further customized below as needed
-            # taploExtraArgs = "--config ./taplo.toml";
           };
 
           # Audit dependencies
@@ -152,15 +134,12 @@
           };
 
           # Run tests with cargo-nextest
-          # Consider setting `doCheck = false` on `my-crate` if you do not want
-          # the tests to run twice
           nunu-cli-nextest = craneLib.cargoNextest (
             commonArgs
             // {
               inherit cargoArtifacts;
               partitions = 1;
               partitionType = "count";
-              cargoNextestPartitionsExtraArgs = "--no-tests=pass";
             }
           );
         };
@@ -178,13 +157,10 @@
           # Inherit inputs from checks.
           checks = self.checks.${system};
 
-          # Additional dev-shell environment variables can be set directly
-          # MY_CUSTOM_DEVELOPMENT_VAR = "something else";
-
           # Extra inputs can be added here; cargo and rustc are provided by default.
-          packages = [
-            pkgs.just
-            pkgs.pre-commit
+          packages = with pkgs; [
+            just
+            pre-commit
           ];
 
           shellHook = ''
