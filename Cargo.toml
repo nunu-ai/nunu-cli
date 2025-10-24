@@ -61,6 +61,9 @@ pre-release-hook = [
   "-o",
   "CHANGELOG.md",
 ]
+pre-release-replacements = [
+  { file = "CHANGELOG.md", search = "Unreleased", replace = "{{version}}" },
+]
 tag-name = "nunu-cli-v{{version}}"
 tag-message = "chore: release nunu-cli version {{version}}"
 pre-release-commit-message = "chore: release nunu-cli v{{version}}"
