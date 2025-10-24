@@ -47,3 +47,11 @@ strip = true
 lto = true
 codegen-units = 1
 opt-level = "z"
+
+# cargo-release configuration
+[package.metadata.release]
+tag-name = "nunu-cli-v{{version}}"
+tag-message = "chore: release nunu-cli version {{version}}"
+pre-release-commit-message = "chore: release nunu-cli v{{version}}"
+publish = false
+allow-branch = ["main"]
