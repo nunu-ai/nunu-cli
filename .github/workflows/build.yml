@@ -70,16 +70,8 @@ jobs:
       - name: Upload to cache
         run: nunu-upload-to-cache
       - name: Prepare artifacts
-        run: |
-          mkdir -p artifacts
-          cp result/bin/${{ matrix.binary }} artifacts/nunu-cli-${{ matrix.platform }}
-          chmod +x artifacts/nunu-cli-${{ matrix.platform }}
-      - name: Upload Artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: nunu-cli-${{ matrix.platform }}
-          path: artifacts/nunu-cli-${{ matrix.platform }}
-          retention-days: 30
+        run: nix run .#release-artifacts
+
 
   create-github-release:
     if: github.ref == 'refs/heads/main' && needs.release.outputs.released == 'true'
@@ -92,7 +84,7 @@ jobs:
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
-          path: artifacts
+          path: result
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
@@ -101,6 +93,6 @@ jobs:
           draft: false
           prerelease: false
           files: |
-            artifacts/nunu-cli-linux/nunu-cli-linux
-            artifacts/nunu-cli-macos/nunu-cli-macos
+            result/bin/nunu-cli
+            result/bin/nunu-cli.exe
           generate_release_notes: true

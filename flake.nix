@@ -38,6 +38,7 @@
           combine [
             default.toolchain
             stable.rust-src
+            targets.x86_64-pc-windows-gnu.latest.rust-std
           ];
 
         inherit (pkgs) lib;
@@ -51,14 +52,12 @@
           strictDeps = true;
           doCheck = false;
 
-
-          buildInputs =
-            [
-              # Add additional build inputs here
-            ]
-            ++ lib.optionals pkgs.stdenv.isDarwin [
-              pkgs.libiconv
-            ];
+          buildInputs = [
+            # Add additional build inputs here
+          ]
+          ++ lib.optionals pkgs.stdenv.isDarwin [
+            pkgs.libiconv
+          ];
         };
 
         # Build *just* the cargo dependencies, so we can reuse
@@ -78,6 +77,7 @@
           commonArgs
           // {
             inherit cargoArtifacts;
+            CARGO_BUILD_TARGET = "x86_64-pc-windows-gnu";
 
             # fixes issues related to libring
             TARGET_CC = "${pkgs.pkgsCross.mingwW64.stdenv.cc}/bin/${pkgs.pkgsCross.mingwW64.stdenv.cc.targetPrefix}cc";
@@ -169,7 +169,16 @@
         packages = {
           default = nunu-cli;
           windows = nunu-cli-windows;
-        } // scripts;
+
+          release-artifacts = pkgs.symlinkJoin {
+            name = "nunu-cli-release";
+            paths = [
+              nunu-cli
+              nunu-cli-windows
+            ];
+          };
+        }
+        // scripts;
 
         apps.default = flake-utils.lib.mkApp {
           drv = nunu-cli;
