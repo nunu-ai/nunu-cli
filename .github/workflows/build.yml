@@ -14,3 +14,20 @@ jobs:
         run: om ci
       - name: Upload to cache
         run: nunu-upload-to-cache
+
+  release:
+    if: github.ref == 'refs/heads/main'
+    permissions:
+      contents: "write"
+    runs-on: [self-hosted, nix, Linux]
+    needs: [build]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # fetch tags
+      - name: Release
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          nix run .#bump-version

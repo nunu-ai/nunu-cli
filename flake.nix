@@ -93,6 +93,28 @@
             ];
           }
         );
+
+        scripts = {
+          bump-version = pkgs.writeShellScriptBin "bump-version" ''
+            set -euo pipefail
+            export PATH="$PATH:${
+              pkgs.lib.makeBinPath [
+                pkgs.convco
+                pkgs.cargo
+                pkgs.cargo-release
+              ]
+            }"
+
+            cur_version=$(convco version --prefix nunu-cli-v)
+            version=$(convco version --bump --prefix nunu-cli-v)
+            if [ "$cur_version" = "$version" ]; then
+              echo "nunu-cli does not require version bump from v$version"
+              exit 0
+            fi
+            echo "Releasing nunu-cli v$version"
+            cargo release --no-confirm --no-publish --execute $version
+          '';
+        };
       in
       {
         checks = {
@@ -147,7 +169,7 @@
         packages = {
           default = nunu-cli;
           windows = nunu-cli-windows;
-        };
+        } // scripts;
 
         apps.default = flake-utils.lib.mkApp {
           drv = nunu-cli;
@@ -161,6 +183,8 @@
           packages = with pkgs; [
             just
             pre-commit
+            cargo-release
+            convco
           ];
 
           shellHook = ''
