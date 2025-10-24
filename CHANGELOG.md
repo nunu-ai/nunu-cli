@@ -1,8 +1,15 @@
 # Changelog
 
-## [nunu-cli-v0.1.1](https://github.com/nunu-ai/nunu-cli/compare/nunu-cli-v0.1.0...c37cc834fb812f27683be4bd7586ff57f7e2f9bf) (2025-10-24)
+## [nunu-cli-v0.1.2](https://github.com/nunu-ai/nunu-cli/compare/nunu-cli-v0.1.1...310bc3a43165305611aced9941b6bdc2c9227e66) (2025-10-24)
 
 ### Fixes
+
+* upload artifacts in post-release-build job
+([310bc3a](https://github.com/nunu-ai/nunu-cli/commit/310bc3a43165305611aced9941b6bdc2c9227e66))
+
+### [nunu-cli-v0.1.1](https://github.com/nunu-ai/nunu-cli/compare/nunu-cli-v0.1.0...nunu-cli-v0.1.1) (2025-10-24)
+
+#### Fixes
 
 * try different artifact path
 ([c37cc83](https://github.com/nunu-ai/nunu-cli/commit/c37cc834fb812f27683be4bd7586ff57f7e2f9bf))
