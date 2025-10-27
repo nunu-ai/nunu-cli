@@ -16,9 +16,11 @@ cargo build --release
 1. **CLI arguments** - Direct command-line options
 2. **Environment variables** - `NUNU_API_TOKEN`, `NUNU_PROJECT_ID`, `NUNU_API_URL`
 3. **Config file via --config** - Explicitly specified config file
-4. **Project config file** - `./nunu.json` or `./.nunu/config.json`
+4. **Project config file** - `./nunu.json`, `./.nunu/config.json` (also `./config.json`, `./.config.json`)
 5. **User config file** - `~/.config/nunu/config.json`
 6. **Default values**
+
+Environment variables or config file is recommended, use `nunu.json` or store it in a location with no naming conflicts.
 
 ### Config File Format
 
@@ -172,7 +174,7 @@ When a termination signal is received:
 
 This ensures proper cleanup in CI/CD environments, containers, and system shutdowns.
 
-## Examples
+## Full Examples
 
 ```bash
 # Simple upload with config file

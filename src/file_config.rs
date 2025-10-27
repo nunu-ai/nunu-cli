@@ -47,9 +47,9 @@ impl FileConfig {
         // Try project directory locations
         let project_paths = vec![
             PathBuf::from("./nunu.json"),
+            PathBuf::from("./.nunu/config.json"),
             PathBuf::from("./config.json"),
             PathBuf::from("./.config.json"),
-            PathBuf::from("./.nunu/config.json"),
         ];
 
         for path in &project_paths {
