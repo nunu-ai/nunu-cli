@@ -130,26 +130,26 @@ pub struct MultipartUploadResponse {
     pub part_size: usize,
 }
 
-/// Request to get presigned URLs for specific parts (now GET with query params)
+/// Request to get upload URLs for specific parts (now GET with query params)
 #[derive(Serialize)]
 #[serde(rename_all = "snake_case")]
-pub struct GetPresignedUrlsParams {
+pub struct GetUploadUrlsParams {
     pub upload_id: String,
     pub object_key: String,
     #[serde(rename = "part_numbers[]")]
     pub part_numbers: Vec<u64>,
 }
 
-/// Response with presigned URLs for parts
+/// Response with upload URLs for parts
 #[derive(Deserialize, Debug)]
 #[serde(rename_all = "snake_case")]
-pub struct GetPresignedUrlsResponse {
-    pub presigned_urls: Vec<PresignedUrlPart>,
+pub struct GetUploadUrlsResponse {
+    pub upload_urls: Vec<UploadUrlPart>,
 }
 
 #[derive(Deserialize, Debug)]
 #[serde(rename_all = "snake_case")]
-pub struct PresignedUrlPart {
+pub struct UploadUrlPart {
     pub part_number: u64,
     pub url: String,
 }
@@ -187,7 +187,7 @@ impl Client {
         }
     }
 
-    /// Request a presigned URL for single-part upload
+    /// Request a upload URL for single-part upload
     ///
     /// # Errors
     ///
@@ -253,13 +253,13 @@ impl Client {
         Ok(upload_response)
     }
 
-    /// Upload file to presigned URL
+    /// Upload file to URL
     ///
     /// # Errors
     ///
     /// Returns an error if the HTTP request fails or if the server returns a non-success status code.
-    pub async fn upload_to_presigned_url(&self, url: &str, data: Vec<u8>) -> Result<()> {
-        info!("Uploading {} bytes to presigned URL", data.len());
+    pub async fn upload_to_url(&self, url: &str, data: Vec<u8>) -> Result<()> {
+        info!("Uploading {} bytes to URL", data.len());
 
         let response = self
             .http
@@ -279,12 +279,12 @@ impl Client {
         Ok(())
     }
 
-    /// Upload file to presigned URL with progress tracking
+    /// Upload file to URL with progress tracking
     ///
     /// # Errors
     ///
     /// Returns an error if the HTTP request fails or if the server returns a non-success status code.
-    pub async fn upload_to_presigned_url_with_progress<F>(
+    pub async fn upload_to_url_with_progress<F>(
         &self,
         url: &str,
         data: Vec<u8>,
@@ -296,7 +296,7 @@ impl Client {
         use futures::StreamExt;
         use std::io::Cursor;
 
-        info!("Uploading {} bytes to presigned URL", data.len());
+        info!("Uploading {} bytes to URL", data.len());
 
         let total_size = data.len() as u64;
 
@@ -432,7 +432,7 @@ impl Client {
         Ok(upload_response)
     }
 
-    /// Request presigned URLs for specific parts
+    /// Request upload URLs for specific parts
     ///
     /// # Errors
     ///
@@ -442,10 +442,10 @@ impl Client {
         upload_id: &str,
         object_key: &str,
         part_numbers: Vec<u64>,
-    ) -> Result<GetPresignedUrlsResponse> {
+    ) -> Result<GetUploadUrlsResponse> {
         let url = format!("{}/upload/parts", self.config.base_upload_url());
         debug!(
-            "Requesting presigned URLs for {} parts at: {url}",
+            "Requesting upload URLs for {} parts at: {url}",
             part_numbers.len()
         );
 
@@ -470,16 +470,13 @@ impl Client {
             return Err(Error::ApiError(format!("Status {status}: {body}")));
         }
 
-        let urls_response: GetPresignedUrlsResponse = response.json().await?;
-        debug!(
-            "Received {} presigned URLs",
-            urls_response.presigned_urls.len()
-        );
+        let urls_response: GetUploadUrlsResponse = response.json().await?;
+        debug!("Received {} upload URLs", urls_response.upload_urls.len());
 
         Ok(urls_response)
     }
 
-    /// Upload a part to a presigned URL and return the `ETag`
+    /// Upload a part to a upload URL and return the `ETag`
     ///
     /// # Errors
     ///

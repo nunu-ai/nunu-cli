@@ -106,7 +106,7 @@ pub async fn upload_multipart(
 
         debug!("Requesting URLs for parts {batch_start}-{batch_end} of {total_parts}");
 
-        // Step 2a: Request presigned URLs for this batch
+        // Step 2a: Request upload URLs for this batch
         let urls_response = client
             .request_part_urls(
                 &initiate_response.upload_id,
@@ -116,10 +116,10 @@ pub async fn upload_multipart(
             .await?;
 
         // Step 2b: Upload parts in this batch concurrently
-        let batch_results: Vec<UploadedPart> = stream::iter(urls_response.presigned_urls)
-            .map(|presigned_url_part| {
-                let part_number = presigned_url_part.part_number;
-                let part_url = presigned_url_part.url;
+        let batch_results: Vec<UploadedPart> = stream::iter(urls_response.upload_urls)
+            .map(|upload_url_part| {
+                let part_number = upload_url_part.part_number;
+                let part_url = upload_url_part.url;
                 let client = client.clone();
                 let file_data = &file_data;
                 let pb = pb.clone();

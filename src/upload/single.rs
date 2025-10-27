@@ -80,13 +80,9 @@ pub async fn upload_single_part(
     // Upload with progress tracking
     let pb_clone = pb.clone();
     client
-        .upload_to_presigned_url_with_progress(
-            &upload_response.upload_url,
-            file_data,
-            move |uploaded| {
-                pb_clone.set_position(uploaded);
-            },
-        )
+        .upload_to_url_with_progress(&upload_response.upload_url, file_data, move |uploaded| {
+            pb_clone.set_position(uploaded);
+        })
         .await?;
 
     pb.finish_with_message("Upload complete");
