@@ -1,8 +1,16 @@
 # Changelog
 
-## [nunu-cli-v0.1.2](https://github.com/nunu-ai/nunu-cli/compare/nunu-cli-v0.1.1...310bc3a43165305611aced9941b6bdc2c9227e66) (2025-10-24)
+## [nunu-cli-v0.1.3](https://github.com/nunu-ai/nunu-cli/compare/nunu-cli-v0.1.2...cca7db3b9275528830e4d40735589a1e4daea754) (2025-10-27)
 
-### Fixes
+### Features
+
+* logging levels, new routes, sigint/sigterm abort, readme docs. better
+logging and verbosity
+([cca7db3](https://github.com/nunu-ai/nunu-cli/commit/cca7db3b9275528830e4d40735589a1e4daea754))
+
+### [nunu-cli-v0.1.2](https://github.com/nunu-ai/nunu-cli/compare/nunu-cli-v0.1.1...nunu-cli-v0.1.2) (2025-10-24)
+
+#### Fixes
 
 * upload artifacts in post-release-build job
 ([310bc3a](https://github.com/nunu-ai/nunu-cli/commit/310bc3a43165305611aced9941b6bdc2c9227e66))
