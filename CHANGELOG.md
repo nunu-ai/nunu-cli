@@ -1,8 +1,15 @@
 # Changelog
 
-## [nunu-cli-v0.1.4](https://github.com/nunu-ai/nunu-cli/compare/nunu-cli-v0.1.3...03d81b497d7415231d4d7d93e376244c745a49b2) (2025-10-27)
+## [nunu-cli-v0.1.5](https://github.com/nunu-ai/nunu-cli/compare/nunu-cli-v0.1.4...5990f92b4a0bdfaad652dc4e4ec09de69766176f) (2025-10-27)
 
 ### Features
+
+* more generic naming
+([5990f92](https://github.com/nunu-ai/nunu-cli/commit/5990f92b4a0bdfaad652dc4e4ec09de69766176f))
+
+### [nunu-cli-v0.1.4](https://github.com/nunu-ai/nunu-cli/compare/nunu-cli-v0.1.3...nunu-cli-v0.1.4) (2025-10-27)
+
+#### Features
 
 * update readme
 ([03d81b4](https://github.com/nunu-ai/nunu-cli/commit/03d81b497d7415231d4d7d93e376244c745a49b2))
