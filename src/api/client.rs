@@ -4,6 +4,7 @@ use log::{debug, info};
 use reqwest::Client as HttpClient;
 use serde::{Deserialize, Serialize};
 
+#[derive(Clone)]
 pub struct Client {
     config: Config,
     http: HttpClient,
@@ -100,6 +101,7 @@ pub struct UploadRequest {
     pub file_name: String,
     pub file_size: u64,
     pub platform: String,
+    pub multipart: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub auto_delete: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -117,24 +119,6 @@ pub struct SinglePartUploadResponse {
     pub object_key: String,
 }
 
-/// Request for initiating a multipart upload
-#[derive(Serialize)]
-#[serde(rename_all = "snake_case")]
-pub struct InitiateMultipartUploadRequest {
-    pub name: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub description: Option<String>,
-    pub file_name: String,
-    pub file_size: u64,
-    pub platform: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub auto_delete: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub deletion_policy: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub upload_timeout: Option<u32>,
-}
-
 /// Response from the server for a multipart upload request
 #[derive(Deserialize, Debug)]
 #[serde(rename_all = "snake_case")]
@@ -146,12 +130,13 @@ pub struct MultipartUploadResponse {
     pub part_size: usize,
 }
 
-/// Request to get presigned URLs for specific parts
+/// Request to get presigned URLs for specific parts (now GET with query params)
 #[derive(Serialize)]
 #[serde(rename_all = "snake_case")]
-pub struct GetPresignedUrlsRequest {
+pub struct GetPresignedUrlsParams {
     pub upload_id: String,
     pub object_key: String,
+    #[serde(rename = "part_numbers[]")]
     pub part_numbers: Vec<u64>,
 }
 
@@ -228,6 +213,7 @@ impl Client {
             file_name: filename.to_string(),
             file_size: size,
             platform: platform.to_string(),
+            multipart: false,
             upload_timeout,
             auto_delete: Some(auto_delete),
             deletion_policy,
@@ -293,6 +279,64 @@ impl Client {
         Ok(())
     }
 
+    /// Upload file to presigned URL with progress tracking
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the HTTP request fails or if the server returns a non-success status code.
+    pub async fn upload_to_presigned_url_with_progress<F>(
+        &self,
+        url: &str,
+        data: Vec<u8>,
+        progress_callback: F,
+    ) -> Result<()>
+    where
+        F: Fn(u64) + Send + Sync + 'static,
+    {
+        use futures::StreamExt;
+        use std::io::Cursor;
+
+        info!("Uploading {} bytes to presigned URL", data.len());
+
+        let total_size = data.len() as u64;
+
+        // Create a stream from the data with progress tracking
+        let cursor = Cursor::new(data);
+        let reader = tokio::io::BufReader::new(cursor);
+
+        // Convert to async stream with progress
+        let stream = tokio_util::io::ReaderStream::new(reader);
+        let mut uploaded = 0u64;
+
+        let stream_with_progress = stream.map(move |chunk| {
+            if let Ok(ref bytes) = chunk {
+                uploaded += bytes.len() as u64;
+                progress_callback(uploaded);
+            }
+            chunk
+        });
+
+        let body = reqwest::Body::wrap_stream(stream_with_progress);
+
+        let response = self
+            .http
+            .put(url)
+            .header("Content-Type", "application/octet-stream")
+            .header("Content-Length", total_size.to_string())
+            .body(body)
+            .send()
+            .await?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            return Err(Error::UploadError(format!("Status {status}: {body}")));
+        }
+
+        info!("Upload successful");
+        Ok(())
+    }
+
     /// Notify backend that upload is complete
     ///
     /// # Errors
@@ -343,15 +387,16 @@ impl Client {
         auto_delete: bool,
         deletion_policy: Option<String>,
     ) -> Result<MultipartUploadResponse> {
-        let url = format!("{}/upload/initiate", self.config.base_upload_url());
+        let url = format!("{}/upload", self.config.base_upload_url());
         debug!("Initiating multipart upload at: {url}");
 
-        let request = InitiateMultipartUploadRequest {
+        let request = UploadRequest {
             name: name.to_string(),
             description,
             file_name: filename.to_string(),
             file_size: size,
             platform: platform.to_string(),
+            multipart: true,
             auto_delete: Some(auto_delete),
             deletion_policy,
             upload_timeout,
@@ -404,13 +449,20 @@ impl Client {
             part_numbers.len()
         );
 
-        let request = GetPresignedUrlsRequest {
-            upload_id: upload_id.to_string(),
-            object_key: object_key.to_string(),
-            part_numbers,
-        };
+        // Convert part numbers to comma-separated string
+        let part_numbers_str = part_numbers
+            .iter()
+            .map(std::string::ToString::to_string)
+            .collect::<Vec<_>>()
+            .join(",");
 
-        let response = self.http.post(&url).json(&request).send().await?;
+        let query_params = [
+            ("upload_id", upload_id),
+            ("object_key", object_key),
+            ("part_numbers", &part_numbers_str),
+        ];
+
+        let response = self.http.get(&url).query(&query_params).send().await?;
 
         if !response.status().is_success() {
             let status = response.status();
@@ -497,6 +549,50 @@ impl Client {
         }
 
         info!("Multipart upload completed successfully");
+        Ok(())
+    }
+
+    /// Abort an upload
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the HTTP request fails or if the server returns a non-success status code.
+    pub async fn abort_upload(
+        &self,
+        build_id: &str,
+        upload_id: Option<&str>,
+        object_key: Option<&str>,
+    ) -> Result<()> {
+        let url = format!("{}/upload", self.config.base_upload_url());
+        debug!("Aborting upload for build: {build_id}");
+
+        let mut query_params = vec![("build_id", build_id.to_string())];
+
+        if let Some(uid) = upload_id {
+            query_params.push(("upload_id", uid.to_string()));
+        }
+
+        if let Some(key) = object_key {
+            query_params.push(("object_key", key.to_string()));
+        }
+
+        let response = self
+            .http
+            .delete(&url)
+            .header("x-api-key", self.config.token.clone())
+            .query(&query_params)
+            .send()
+            .await?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            return Err(Error::ApiError(format!(
+                "Abort upload failed - Status {status}: {body}"
+            )));
+        }
+
+        info!("Upload aborted successfully");
         Ok(())
     }
 }

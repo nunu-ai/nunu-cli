@@ -1,8 +1,10 @@
 //! Nunu CLI library for uploading build artifacts
 
-pub mod api;
 pub mod config;
 pub mod error;
+pub mod file_config;
+
+pub mod api;
 pub mod upload;
 
 pub use config::Config;

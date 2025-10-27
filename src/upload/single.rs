@@ -40,28 +40,53 @@ pub async fn upload_single_part(
             filename,
             file_size,
             &options.platform,
-            options.description,
+            options.description.clone(),
             options.upload_timeout,
             options.auto_delete,
-            options.deletion_policy,
+            options.deletion_policy.clone(),
         )
         .await?;
 
+    // Notify about upload initiation
+    if let Some(callback) = &options.on_upload_initiated {
+        callback(
+            upload_response.build_id.clone(),
+            None,
+            upload_response.object_key.clone(),
+        );
+    }
+
     let file_data = tokio::fs::read(file_path).await?;
 
-    let pb = ProgressBar::new(file_size);
-    #[allow(clippy::expect_used)]
-    pb.set_style(
-        ProgressStyle::default_bar()
-            .template(
-                "{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {bytes}/{total_bytes} ({eta})"
-            )
-            .expect("Failed to set progress bar template")
-            .progress_chars("#>-"),
-    );
+    // Use provided progress bar or create a new one
+    let pb = if let Some(pb) = options.progress_bar.clone() {
+        pb.set_length(file_size);
+        pb.set_message(format!("Uploading {filename}"));
+        pb
+    } else {
+        let pb = ProgressBar::new(file_size);
+        #[allow(clippy::expect_used)]
+        pb.set_style(
+            ProgressStyle::default_bar()
+                .template(
+                    "{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {bytes}/{total_bytes} ({eta}) {msg}"
+                )
+                .expect("Failed to set progress bar template")
+                .progress_chars("#>-"),
+        );
+        pb
+    };
 
+    // Upload with progress tracking
+    let pb_clone = pb.clone();
     client
-        .upload_to_presigned_url(&upload_response.upload_url, file_data)
+        .upload_to_presigned_url_with_progress(
+            &upload_response.upload_url,
+            file_data,
+            move |uploaded| {
+                pb_clone.set_position(uploaded);
+            },
+        )
         .await?;
 
     pb.finish_with_message("Upload complete");

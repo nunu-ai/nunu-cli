@@ -1,16 +1,41 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use env_logger::Env;
 use futures::stream::{self, StreamExt};
-use log::{debug, error, info};
-use nunu_cli::{BuildPlatform, Config, DeletionPolicy, UploadOptions, upload_file};
-use std::path::Path;
+use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
+use log::{debug, error, info, warn};
+use nunu_cli::{
+    BuildPlatform, Client, Config, DeletionPolicy, UploadOptions, file_config::FileConfig,
+    upload_file,
+};
+use std::collections::HashMap;
+use std::io::Write;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use tokio::sync::RwLock;
+
+/// Tracks active uploads for graceful cancellation
+type ActiveUploads = Arc<RwLock<HashMap<String, UploadMetadata>>>;
+
+#[derive(Debug, Clone)]
+struct UploadMetadata {
+    build_id: String,
+    upload_id: Option<String>,
+    object_key: String,
+}
 
 #[derive(Parser)]
 #[command(name = "nunu-cli")]
 #[command(about = "Upload build artifacts to Nunu.ai", long_about = None)]
 #[command(version)]
 struct Cli {
+    /// Enable verbose output (shows all logs)
+    #[arg(short, long, global = true, action = clap::ArgAction::Count)]
+    verbose: u8,
+
+    /// Path to config file (JSON format)
+    #[arg(short, long, global = true)]
+    config: Option<PathBuf>,
+
     #[command(subcommand)]
     command: Commands,
 }
@@ -18,21 +43,23 @@ struct Cli {
 #[derive(Subcommand)]
 enum Commands {
     /// Upload a build artifact
+    #[command(override_usage = "<FILES>... [OPTIONS]")]
     Upload {
         /// Files to upload (can specify multiple files)
+        #[arg(value_name = "FILES", num_args = 1..)]
         files: Vec<String>,
 
         /// API token for authentication
         #[arg(short, long, env = "NUNU_API_TOKEN")]
-        token: String,
+        token: Option<String>,
 
         /// Project ID
         #[arg(short, long, env = "NUNU_PROJECT_ID")]
-        project_id: String,
+        project_id: Option<String>,
 
         /// API base URL
-        #[arg(long, default_value = "https://nunu.ai/api", env = "NUNU_API_URL")]
-        api_url: String,
+        #[arg(long, env = "NUNU_API_URL")]
+        api_url: Option<String>,
 
         /// Build name (will be used as template for multiple files)
         #[arg(short, long)]
@@ -58,7 +85,7 @@ enum Commands {
         #[arg(long, default_value = "least_recent", requires = "auto_delete", value_parser = clap::value_parser!(DeletionPolicy))]
         deletion_policy: DeletionPolicy,
 
-        /// Force multipart upload (useful for debugging)
+        /// Force multipart upload
         #[arg(long)]
         force_multipart: bool,
 
@@ -126,9 +153,26 @@ async fn main() -> Result<()> {
         debug!("Loaded environment from .env file");
     }
 
-    env_logger::Builder::from_env(Env::default().default_filter_or("info")).init();
-
     let cli = Cli::parse();
+
+    // Initialize logger based on verbose flag
+    // 0: warn/error only (clean 2-line display)
+    // 1: info level (general progress)
+    // 2: debug level (detailed debugging)
+    // 3+: trace level (maximum detail)
+    if cli.verbose > 0 {
+        let log_level = match cli.verbose {
+            1 => "info",
+            2 => "debug",
+            _ => "trace",
+        };
+        env_logger::Builder::from_env(env_logger::Env::default().default_filter_or(log_level))
+            .format(|buf, record| writeln!(buf, "[{}] {}", record.level(), record.args()))
+            .init();
+    } else {
+        // In non-verbose mode, only show warnings and errors
+        env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
+    }
 
     let result: Result<String> = match cli.command {
         Commands::Upload {
@@ -156,61 +200,306 @@ async fn main() -> Result<()> {
                 ));
             }
 
-            info!("Using API URL: {api_url}");
-            info!("Parallel uploads/parts: {parallel}");
-            let config = Config::new(token, project_id, api_url)?;
+            // Load config file with priority:
+            // 1. CLI args (highest)
+            // 2. Environment variables
+            // 3. Config file (--config or default locations)
+            let file_config = FileConfig::load_with_fallback(cli.config.as_ref())?;
+
+            // Resolve final values with priority
+            let final_token = token
+                .or_else(|| std::env::var("NUNU_API_TOKEN").ok())
+                .or(file_config.api_token)
+                .ok_or_else(|| anyhow::anyhow!("API token not provided (use --token, NUNU_API_TOKEN env var, or config file)"))?;
+
+            let final_project_id = project_id
+                .or_else(|| std::env::var("NUNU_PROJECT_ID").ok())
+                .or(file_config.project_id)
+                .ok_or_else(|| anyhow::anyhow!("Project ID not provided (use --project-id, NUNU_PROJECT_ID env var, or config file)"))?;
+
+            let final_api_url = api_url
+                .or_else(|| std::env::var("NUNU_API_URL").ok())
+                .or(file_config.api_url)
+                .unwrap_or_else(|| "https://nunu.ai/api".to_string());
+
+            let config = Config::new(final_token, final_project_id, final_api_url)?;
 
             let file_count = files.len();
 
+            // Shared state for tracking active uploads
+            let active_uploads: ActiveUploads = Arc::new(RwLock::new(HashMap::new()));
+
+            // Create MultiProgress for coordinated progress display
+            let multi_progress = MultiProgress::new();
+
+            // Create a status line for non-verbose mode
+            let status_bar = if cli.verbose == 0 {
+                let bar = multi_progress.insert(0, ProgressBar::new(0));
+                bar.set_style(
+                    ProgressStyle::default_bar()
+                        .template("{msg}")
+                        .unwrap_or_else(|_| ProgressStyle::default_bar()),
+                );
+                Some(bar)
+            } else {
+                None
+            };
+
+            // Helper to log messages
+            let log_message = |msg: String| {
+                if let Some(ref bar) = status_bar {
+                    bar.set_message(msg);
+                } else {
+                    info!("{msg}");
+                }
+            };
+
+            log_message(format!("Using API URL: {}", config.api_url));
+            log_message(format!("Parallel uploads/parts: {parallel}"));
+
+            // Set up signal handlers for graceful shutdown
+            #[cfg(unix)]
+            let mut sigterm = {
+                use tokio::signal::unix::{SignalKind, signal};
+                signal(SignalKind::terminate()).ok()
+            };
+
+            let ctrl_c = tokio::signal::ctrl_c();
+
             // Process files in parallel using streams
-            let results: Vec<(String, Result<String>)> = stream::iter(files)
-                .map(|file_path| {
-                    let config = config.clone();
-                    let name = name.clone();
-                    let platform = platform.clone();
-                    let description = description.clone();
-                    let deletion_policy = deletion_policy.clone();
+            let verbose = cli.verbose;
+            let upload_task = async {
+                stream::iter(files)
+                    .map(|file_path| {
+                        let config = config.clone();
+                        let name = name.clone();
+                        let platform = platform.clone();
+                        let description = description.clone();
+                        let deletion_policy = deletion_policy.clone();
+                        let active_uploads = active_uploads.clone();
+                        let multi_progress = multi_progress.clone();
+                        let status_bar = status_bar.clone();
 
-                    async move {
-                        // Determine platform (explicit or inferred)
-                        let file_platform = match &platform {
-                            Some(p) => p.clone(),
-                            None => match infer_platform(&file_path) {
-                                Ok(p) => p,
-                                Err(e) => {
-                                    return (file_path.clone(), Err(e));
+                        async move {
+                            // Helper to log messages
+                            let log_msg = |msg: String| {
+                                if verbose == 0 {
+                                    if let Some(ref bar) = status_bar {
+                                        bar.set_message(msg);
+                                    }
+                                } else {
+                                    info!("{msg}");
                                 }
-                            },
-                        };
+                            };
+                            // Determine platform (explicit or inferred)
+                            let file_platform = match &platform {
+                                Some(p) => p.clone(),
+                                None => match infer_platform(&file_path) {
+                                    Ok(p) => p,
+                                    Err(e) => {
+                                        return (file_path.clone(), Err(e));
+                                    }
+                                },
+                            };
 
-                        // Generate build name
-                        let build_name = generate_build_name(&name, &file_path, file_count);
+                            // Generate build name
+                            let build_name = generate_build_name(&name, &file_path, file_count);
 
-                        info!(
-                            "Uploading {file_path} as {build_name} (platform: {})",
-                            file_platform.as_str()
-                        );
+                            // Get file size for progress bar
+                            let file_size = match tokio::fs::metadata(&file_path).await {
+                                Ok(metadata) => metadata.len(),
+                                Err(e) => {
+                                    return (file_path.clone(), Err(anyhow::anyhow!("Failed to read file metadata: {e}")));
+                                }
+                            };
 
-                        let options = UploadOptions {
-                            name: build_name,
-                            platform: file_platform.as_str().to_string(),
-                            description: description.clone(),
-                            upload_timeout,
-                            auto_delete,
-                            deletion_policy: Some(deletion_policy.as_str().to_string()),
-                            force_multipart,
-                            parallel,
-                        };
+                            // Create progress bar for this upload
+                            let pb = multi_progress.add(ProgressBar::new(file_size));
+                            pb.set_style(
+                                ProgressStyle::default_bar()
+                                    .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {bytes}/{total_bytes} ({eta}) {msg}")
+                                    .unwrap_or_else(|_| ProgressStyle::default_bar())
+                                    .progress_chars("#>-"),
+                            );
+                            pb.set_message(Path::new(&file_path).file_name().and_then(|n| n.to_str()).unwrap_or(&file_path).to_string());
 
-                        let result = upload_file(&config, &file_path, options)
-                            .await
-                            .map_err(|e| anyhow::anyhow!("{e}"));
-                        (file_path, result)
+                            log_msg(format!(
+                                "Uploading {} as {} (platform: {})",
+                                file_path,
+                                build_name,
+                                file_platform.as_str()
+                            ));
+
+                            // Create callback to track upload metadata
+                            let file_path_clone = file_path.clone();
+                            let active_uploads_clone = active_uploads.clone();
+                            let callback = std::sync::Arc::new(
+                                move |build_id: String,
+                                      upload_id: Option<String>,
+                                      object_key: String| {
+                                    let file_path = file_path_clone.clone();
+                                    let active_uploads = active_uploads_clone.clone();
+                                    tokio::spawn(async move {
+                                        let mut uploads = active_uploads.write().await;
+                                        uploads.insert(
+                                            file_path,
+                                            UploadMetadata {
+                                                build_id,
+                                                upload_id,
+                                                object_key,
+                                            },
+                                        );
+                                    });
+                                },
+                            );
+
+                            let options = UploadOptions {
+                                name: build_name,
+                                platform: file_platform.as_str().to_string(),
+                                description: description.clone(),
+                                upload_timeout,
+                                auto_delete,
+                                deletion_policy: Some(deletion_policy.as_str().to_string()),
+                                force_multipart,
+                                parallel,
+                                on_upload_initiated: Some(callback),
+                                progress_bar: Some(pb.clone()),
+                            };
+
+                            let result = upload_file(&config, &file_path, options)
+                                .await
+                                .map_err(|e| anyhow::anyhow!("{e}"));
+
+                            // Finish progress bar
+                            if result.is_ok() {
+                                pb.finish_with_message("✓ Complete");
+                            } else {
+                                pb.finish_with_message("✗ Failed");
+                            }
+
+                            // Remove from active uploads on completion (success or failure)
+                            {
+                                let mut uploads = active_uploads.write().await;
+                                uploads.remove(&file_path);
+                            }
+
+                            (file_path, result)
+                        }
+                    })
+                    .buffer_unordered(parallel)
+                    .collect::<Vec<(String, Result<String>)>>()
+                    .await
+            };
+
+            // Wait for either upload completion or termination signal
+            #[cfg(unix)]
+            let results = {
+                tokio::select! {
+                    results = upload_task => results,
+                    _ = ctrl_c => {
+                        eprintln!("\n🛑 Received interrupt signal (SIGINT/Ctrl+C).");
+
+                        // Try to abort all active uploads
+                        let uploads = active_uploads.read().await;
+                        if !uploads.is_empty() {
+                            eprintln!("⏳ Attempting to abort {} active upload(s)...", uploads.len());
+                            let client = Client::new(config.clone());
+
+                            for (file_path, metadata) in uploads.iter() {
+                                debug!("Aborting upload for {file_path}: build_id={}", metadata.build_id);
+                                if let Err(e) = client
+                                    .abort_upload(
+                                        &metadata.build_id,
+                                        metadata.upload_id.as_deref(),
+                                        Some(&metadata.object_key),
+                                    )
+                                    .await
+                                {
+                                    warn!("Failed to abort upload for {file_path}: {e}");
+                                } else {
+                                    debug!("Successfully aborted upload for {file_path}");
+                                }
+                            }
+                            eprintln!("✓ Abort requests sent.");
+                        }
+
+                        eprintln!("⚠️  Upload cancelled.");
+                        std::process::exit(130); // Standard exit code for SIGINT
                     }
-                })
-                .buffer_unordered(parallel)
-                .collect()
-                .await;
+                    _ = async {
+                        match sigterm.as_mut() {
+                            Some(sig) => sig.recv().await,
+                            None => std::future::pending().await,
+                        }
+                    }, if sigterm.is_some() => {
+                        eprintln!("\n🛑 Received termination signal (SIGTERM).");
+
+                        // Try to abort all active uploads
+                        let uploads = active_uploads.read().await;
+                        if !uploads.is_empty() {
+                            eprintln!("⏳ Attempting to abort {} active upload(s)...", uploads.len());
+                            let client = Client::new(config.clone());
+
+                            for (file_path, metadata) in uploads.iter() {
+                                debug!("Aborting upload for {file_path}: build_id={}", metadata.build_id);
+                                if let Err(e) = client
+                                    .abort_upload(
+                                        &metadata.build_id,
+                                        metadata.upload_id.as_deref(),
+                                        Some(&metadata.object_key),
+                                    )
+                                    .await
+                                {
+                                    warn!("Failed to abort upload for {file_path}: {e}");
+                                } else {
+                                    debug!("Successfully aborted upload for {file_path}");
+                                }
+                            }
+                            eprintln!("✓ Abort requests sent.");
+                        }
+
+                        eprintln!("⚠️  Upload terminated.");
+                        std::process::exit(143); // Standard exit code for SIGTERM (128 + 15)
+                    }
+                }
+            };
+
+            #[cfg(not(unix))]
+            let results = {
+                tokio::select! {
+                    results = upload_task => results,
+                    _ = ctrl_c => {
+                        eprintln!("\n🛑 Received interrupt signal (Ctrl+C).");
+
+                        // Try to abort all active uploads
+                        let uploads = active_uploads.read().await;
+                        if !uploads.is_empty() {
+                            eprintln!("⏳ Attempting to abort {} active upload(s)...", uploads.len());
+                            let client = Client::new(config.clone());
+
+                            for (file_path, metadata) in uploads.iter() {
+                                debug!("Aborting upload for {file_path}: build_id={}", metadata.build_id);
+                                if let Err(e) = client
+                                    .abort_upload(
+                                        &metadata.build_id,
+                                        metadata.upload_id.as_deref(),
+                                        Some(&metadata.object_key),
+                                    )
+                                    .await
+                                {
+                                    warn!("Failed to abort upload for {file_path}: {e}");
+                                } else {
+                                    debug!("Successfully aborted upload for {file_path}");
+                                }
+                            }
+                            eprintln!("✓ Abort requests sent.");
+                        }
+
+                        eprintln!("⚠️  Upload cancelled.");
+                        std::process::exit(130); // Standard exit code for SIGINT
+                    }
+                }
+            };
 
             // Process results
             let mut build_ids = Vec::new();

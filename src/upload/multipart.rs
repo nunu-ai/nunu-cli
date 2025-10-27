@@ -2,6 +2,7 @@ use crate::api::{Client, client::UploadedPart};
 use crate::config::Config;
 use crate::error::Result;
 use crate::upload::UploadOptions;
+use futures::stream::{self, StreamExt};
 use indicatif::{ProgressBar, ProgressStyle};
 use log::{debug, info};
 use std::path::Path;
@@ -19,6 +20,7 @@ use std::path::Path;
 /// # Panics
 ///
 /// Panics if the progress bar template string is invalid (which should not happen with the hardcoded template).
+#[allow(clippy::too_many_lines)]
 pub async fn upload_multipart(
     config: &Config,
     file_path: &str,
@@ -45,12 +47,21 @@ pub async fn upload_multipart(
             filename,
             file_size,
             &options.platform,
-            options.description,
+            options.description.clone(),
             options.upload_timeout,
             options.auto_delete,
-            options.deletion_policy,
+            options.deletion_policy.clone(),
         )
         .await?;
+
+    // Notify about upload initiation
+    if let Some(callback) = &options.on_upload_initiated {
+        callback(
+            initiate_response.build_id.clone(),
+            Some(initiate_response.upload_id.clone()),
+            initiate_response.object_key.clone(),
+        );
+    }
 
     info!(
         "Multipart upload initiated - {} parts of {} MB each",
@@ -61,17 +72,24 @@ pub async fn upload_multipart(
     // Read the entire file
     let file_data = tokio::fs::read(file_path).await?;
 
-    // Create progress bar
-    let pb = ProgressBar::new(file_size);
-    #[allow(clippy::expect_used)]
-    pb.set_style(
-        ProgressStyle::default_bar()
-            .template(
-                "{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {bytes}/{total_bytes} ({eta})"
-            )
-            .expect("Failed to set progress bar template")
-            .progress_chars("#>-"),
-    );
+    // Use provided progress bar or create a new one
+    let pb = if let Some(pb) = options.progress_bar.clone() {
+        pb.set_length(file_size);
+        pb.set_message(format!("Uploading {filename}"));
+        pb
+    } else {
+        let pb = ProgressBar::new(file_size);
+        #[allow(clippy::expect_used)]
+        pb.set_style(
+            ProgressStyle::default_bar()
+                .template(
+                    "{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {bytes}/{total_bytes} ({eta}) {msg}"
+                )
+                .expect("Failed to set progress bar template")
+                .progress_chars("#>-"),
+        );
+        pb
+    };
 
     // Step 2: Upload parts
     // Process parts in batches to avoid too many concurrent requests
@@ -97,30 +115,42 @@ pub async fn upload_multipart(
             )
             .await?;
 
-        // Step 2b: Upload each part in this batch
-        for presigned_url_part in urls_response.presigned_urls {
-            let part_number = presigned_url_part.part_number;
-            let part_url = presigned_url_part.url;
+        // Step 2b: Upload parts in this batch concurrently
+        let batch_results: Vec<UploadedPart> = stream::iter(urls_response.presigned_urls)
+            .map(|presigned_url_part| {
+                let part_number = presigned_url_part.part_number;
+                let part_url = presigned_url_part.url;
+                let client = client.clone();
+                let file_data = &file_data;
+                let pb = pb.clone();
 
-            // Calculate part data boundaries
-            #[allow(clippy::cast_possible_truncation)]
-            let start = ((part_number - 1) as usize) * part_size;
-            let end = (start + part_size).min(file_data.len());
-            let part_data = file_data[start..end].to_vec();
+                async move {
+                    // Calculate part data boundaries
+                    #[allow(clippy::cast_possible_truncation)]
+                    let start = ((part_number - 1) as usize) * part_size;
+                    let end = (start + part_size).min(file_data.len());
+                    let part_data = file_data[start..end].to_vec();
 
-            debug!("Uploading part {} ({} bytes)", part_number, part_data.len());
+                    debug!("Uploading part {} ({} bytes)", part_number, part_data.len());
 
-            // Upload the part
-            let etag = client.upload_part(&part_url, part_data.clone()).await?;
+                    // Upload the part
+                    let etag = client.upload_part(&part_url, part_data.clone()).await?;
 
-            // Store the uploaded part info
-            uploaded_parts.push(UploadedPart { part_number, etag });
+                    // Update progress
+                    pb.inc(part_data.len() as u64);
 
-            // Update progress
-            pb.inc(part_data.len() as u64);
+                    debug!("Part {part_number} uploaded successfully");
 
-            info!("Part {part_number} uploaded successfully");
-        }
+                    Ok::<UploadedPart, crate::error::Error>(UploadedPart { part_number, etag })
+                }
+            })
+            .buffer_unordered(options.parallel)
+            .collect::<Vec<Result<UploadedPart>>>()
+            .await
+            .into_iter()
+            .collect::<Result<Vec<UploadedPart>>>()?;
+
+        uploaded_parts.extend(batch_results);
     }
 
     pb.finish_with_message("All parts uploaded");
