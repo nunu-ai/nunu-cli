@@ -1,8 +1,15 @@
 # Changelog
 
-## [nunu-cli-v0.1.5](https://github.com/nunu-ai/nunu-cli/compare/nunu-cli-v0.1.4...5990f92b4a0bdfaad652dc4e4ec09de69766176f) (2025-10-27)
+## [nunu-cli-v0.1.6](https://github.com/nunu-ai/nunu-cli/compare/nunu-cli-v0.1.5...9f3ab467d476ac351ed13222f843a611f9dc8366) (2025-10-28)
 
 ### Features
+
+* add versioning to filename and command
+([9f3ab46](https://github.com/nunu-ai/nunu-cli/commit/9f3ab467d476ac351ed13222f843a611f9dc8366))
+
+### [nunu-cli-v0.1.5](https://github.com/nunu-ai/nunu-cli/compare/nunu-cli-v0.1.4...nunu-cli-v0.1.5) (2025-10-27)
+
+#### Features
 
 * more generic naming
 ([5990f92](https://github.com/nunu-ai/nunu-cli/commit/5990f92b4a0bdfaad652dc4e4ec09de69766176f))
