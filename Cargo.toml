@@ -3,6 +3,13 @@ name = "nunu-cli"
 version = "0.1.6"
 edition = "2024"
 publish = false
+authors = ["Nunu.ai"]
+description = "CLI tool for uploading build artifacts to Nunu.ai"
+homepage = "https://nunu.ai"
+repository = "https://github.com/nunu-ai/nunu-cli"
+license = "MIT OR Apache-2.0"
+keywords = ["cli", "upload", "build", "artifacts", "deployment"]
+categories = ["command-line-utilities", "development-tools"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
