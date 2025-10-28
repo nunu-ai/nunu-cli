@@ -47,6 +47,9 @@ tokio = { version = "1.45.0", features = [
 tokio-util = { version = "0.7", features = ["io"] }
 url = "2.5"
 
+[target.'cfg(windows)'.build-dependencies]
+winres = "0.1"
+
 [lints.clippy]
 expect_used = "warn"
 pedantic = { level = "warn", priority = -1 }
@@ -57,6 +60,7 @@ strip = true
 lto = true
 codegen-units = 1
 opt-level = "z"
+panic = "abort"
 
 # cargo-release configuration
 [package.metadata.release]
