@@ -1,23 +1,18 @@
 # Changelog
 
-## v0.1.7 (2025-10-29)
+## [v0.1.7](https://github.com/nunu-ai/nunu-cli/compare/v0.1.6...7a61dd1aa8b2d3d8ea97e0dddf28dd0f18c8cfa7) (2025-10-29)
 
 ### Features
 
-* fix flake
-([b06bb0a](https://github.com/nunu-ai/nunu-cli/commit/b06bb0abf913f297f93c934188ffa696a09ac7a9))
-* trigger build
-([f859e9f](https://github.com/nunu-ai/nunu-cli/commit/f859e9fb3a1844d6540b2c58ae4d9ae02b9f591a))
-* trigger build
-([805e55d](https://github.com/nunu-ai/nunu-cli/commit/805e55d4a678e7d2ba0d4f519130d854b4b1f253))
-* trigger build
-([f2e943c](https://github.com/nunu-ai/nunu-cli/commit/f2e943ce0fcd95a6280fe071fb1bfeb196ab2b36))
-* trigger build
-([06aff5c](https://github.com/nunu-ai/nunu-cli/commit/06aff5cf05566f2ec6568c2feec8b885bbef642d))
-* trigger build
-([ddae51f](https://github.com/nunu-ai/nunu-cli/commit/ddae51f8b1b6e36f6f50319202acf4f0b4d0a3e1))
+* trigger release
+([7a61dd1](https://github.com/nunu-ai/nunu-cli/commit/7a61dd1aa8b2d3d8ea97e0dddf28dd0f18c8cfa7))
 * collect some metadata from CI and user-defined tags
 ([102cbc9](https://github.com/nunu-ai/nunu-cli/commit/102cbc956451953ea0ab4b67cc75f8170f92a276))
+
+### v0.1.6 (2025-10-28)
+
+#### Features
+
 * add versioning to filename and command
 ([9f3ab46](https://github.com/nunu-ai/nunu-cli/commit/9f3ab467d476ac351ed13222f843a611f9dc8366))
 * more generic naming
@@ -44,7 +39,7 @@ logging and verbosity
 * nunu-cli for upload
 ([653e6bf](https://github.com/nunu-ai/nunu-cli/commit/653e6bff0b655e75fb8e0840a037be57d0b45660))
 
-### Fixes
+#### Fixes
 
 * upload artifacts in post-release-build job
 ([310bc3a](https://github.com/nunu-ai/nunu-cli/commit/310bc3a43165305611aced9941b6bdc2c9227e66))
