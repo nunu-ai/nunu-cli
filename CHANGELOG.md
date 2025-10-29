@@ -1,8 +1,15 @@
 # Changelog
 
-## [v0.1.7](https://github.com/nunu-ai/nunu-cli/compare/v0.1.6...7a61dd1aa8b2d3d8ea97e0dddf28dd0f18c8cfa7) (2025-10-29)
+## [v0.1.8](https://github.com/nunu-ai/nunu-cli/compare/v0.1.7...3be8087076b44916f1a4c55733cac8d749005933) (2025-10-29)
 
 ### Features
+
+* static linked linux
+([3be8087](https://github.com/nunu-ai/nunu-cli/commit/3be8087076b44916f1a4c55733cac8d749005933))
+
+### [v0.1.7](https://github.com/nunu-ai/nunu-cli/compare/v0.1.6...v0.1.7) (2025-10-29)
+
+#### Features
 
 * trigger release
 ([7a61dd1](https://github.com/nunu-ai/nunu-cli/commit/7a61dd1aa8b2d3d8ea97e0dddf28dd0f18c8cfa7))
