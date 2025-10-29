@@ -29,22 +29,35 @@ jobs:
         with:
           fetch-depth: 0
           fetch-tags: true
+
       - name: Release
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           nix run .#bump-version
+
+      - name: Pull new tag  # ADD THIS STEP
+        run: |
+          echo "Fetching new tags and commits..."
+          git fetch --tags origin
+          git pull origin main
+          echo "Current HEAD:"
+          git log -1 --oneline --decorate
+
       - name: Get version
         id: get-version
         run: |
-          # Check if HEAD has a tag matching v* pattern (CHANGED)
           TAG=$(git describe --exact-match --tags HEAD 2>/dev/null || echo "")
+          echo "Tag on HEAD: '$TAG'"
+
           if [ -n "$TAG" ] && [[ "$TAG" == v* ]]; then
-            VERSION=$(echo "$TAG" | sed 's/^v//')  # Remove v prefix
+            VERSION=$(echo "$TAG" | sed 's/^v//')
             echo "version=$VERSION" >> $GITHUB_OUTPUT
             echo "released=true" >> $GITHUB_OUTPUT
+            echo "✓ Released version $VERSION"
           else
             echo "released=false" >> $GITHUB_OUTPUT
+            echo "ℹ No release tag created (no version bump needed)"
           fi
 
   post-release-build:
@@ -54,9 +67,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.ref }}
+          ref: v${{ needs.release.outputs.version }}  # CHANGED: Checkout the specific tag
+
       - name: Build release artifacts
-        run: nix build .#release-artifacts
+        run: nix build .#release-artifacts --refresh
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -73,20 +88,23 @@ jobs:
     needs: [release, post-release-build]
     steps:
       - uses: actions/checkout@v4
+
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
           name: release-binaries
           path: artifacts
+
       - name: Rename artifacts with version
         run: |
           VERSION=${{ needs.release.outputs.version }}
           mv artifacts/nunu-cli artifacts/nunu-cli-v${VERSION}-linux-x86_64
           mv artifacts/nunu-cli.exe artifacts/nunu-cli-v${VERSION}-windows-x86_64.exe
+
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: v${{ needs.release.outputs.version }}  # CHANGED: v0.1.6 instead of nunu-cli-v0.1.6
+          tag_name: v${{ needs.release.outputs.version }}
           name: Release v${{ needs.release.outputs.version }}
           draft: false
           prerelease: false
