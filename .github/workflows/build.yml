@@ -27,20 +27,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0 # fetch tags
+          fetch-depth: 0
       - name: Release
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
           nix run .#bump-version
       - name: Get version
         id: get-version
         run: |
-          # Check if HEAD has a tag matching our pattern
+          # Check if HEAD has a tag matching v* pattern (CHANGED)
           TAG=$(git describe --exact-match --tags HEAD 2>/dev/null || echo "")
-          if [ -n "$TAG" ] && [[ "$TAG" == nunu-cli-v* ]]; then
-            VERSION=$(echo "$TAG" | sed 's/nunu-cli-v//')
+          if [ -n "$TAG" ] && [[ "$TAG" == v* ]]; then
+            VERSION=$(echo "$TAG" | sed 's/^v//')  # Remove v prefix
             echo "version=$VERSION" >> $GITHUB_OUTPUT
             echo "released=true" >> $GITHUB_OUTPUT
           else
@@ -65,7 +64,6 @@ jobs:
             result/bin/nunu-cli
             result/bin/nunu-cli.exe
 
-
   create-github-release:
     if: github.ref == 'refs/heads/main' && needs.release.outputs.released == 'true'
     permissions:
@@ -87,7 +85,7 @@ jobs:
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: nunu-cli-v${{ needs.release.outputs.version }}
+          tag_name: v${{ needs.release.outputs.version }}  # CHANGED: v0.1.6 instead of nunu-cli-v0.1.6
           name: Release v${{ needs.release.outputs.version }}
           draft: false
           prerelease: false

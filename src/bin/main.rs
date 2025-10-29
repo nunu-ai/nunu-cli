@@ -4,7 +4,11 @@ use futures::stream::{self, StreamExt};
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use log::{debug, error, info, warn};
 use nunu_cli::{
-    BuildPlatform, Client, Config, DeletionPolicy, UploadOptions, file_config::FileConfig,
+    BuildPlatform, Client, Config, DeletionPolicy, UploadOptions,
+    api::client::{BuildDetails, UploadInfo},
+    ci_metadata::collect_ci_metadata,
+    file_config::FileConfig,
+    metadata::collect_git_metadata,
     upload_file,
 };
 use std::collections::HashMap;
@@ -92,6 +96,10 @@ enum Commands {
         /// Number of parallel uploads/parts (1-32, default: 4)
         #[arg(long, default_value = "4")]
         parallel: usize,
+
+        /// Tags for the build (comma-separated, max 50 chars each)
+        #[arg(long, value_delimiter = ',')]
+        tags: Option<Vec<String>>,
     },
 }
 
@@ -188,6 +196,7 @@ async fn main() -> Result<()> {
             deletion_policy,
             force_multipart,
             parallel,
+            tags,
         } => {
             if files.is_empty() {
                 return Err(anyhow::anyhow!("No files specified for upload"));
@@ -198,6 +207,22 @@ async fn main() -> Result<()> {
                 return Err(anyhow::anyhow!(
                     "Parallel value must be between 1 and 32, got {parallel}"
                 ));
+            }
+
+            // Validate tags (each tag must be 1-50 characters)
+            if let Some(ref tag_list) = tags {
+                for tag in tag_list {
+                    if tag.is_empty() {
+                        return Err(anyhow::anyhow!("Tags cannot be empty"));
+                    }
+                    if tag.len() > 50 {
+                        return Err(anyhow::anyhow!(
+                            "Tag '{}' exceeds maximum length of 50 characters (length: {})",
+                            tag,
+                            tag.len()
+                        ));
+                    }
+                }
             }
 
             // Load config file with priority:
@@ -257,6 +282,37 @@ async fn main() -> Result<()> {
             log_message(format!("Using API URL: {}", config.api_url));
             log_message(format!("Parallel uploads/parts: {parallel}"));
 
+            // Collect build metadata
+            debug!("Collecting build metadata (VCS and CI/CD)");
+            let vcs = collect_git_metadata();
+            let ci = collect_ci_metadata();
+            let upload_info = Some(UploadInfo {
+                method: "cli".to_string(),
+                cli_version: Some(env!("CARGO_PKG_VERSION").to_string()),
+                uploader: std::env::var("USER")
+                    .ok()
+                    .or_else(|| std::env::var("USERNAME").ok()),
+            });
+
+            let details = if vcs.is_some() || ci.is_some() || upload_info.is_some() {
+                Some(BuildDetails {
+                    vcs,
+                    ci,
+                    upload: upload_info,
+                })
+            } else {
+                None
+            };
+
+            if let Some(ref d) = details {
+                if d.vcs.is_some() {
+                    debug!("Collected VCS metadata: Git");
+                }
+                if d.ci.is_some() {
+                    debug!("Collected CI/CD metadata");
+                }
+            }
+
             // Set up signal handlers for graceful shutdown
             #[cfg(unix)]
             let mut sigterm = {
@@ -279,6 +335,8 @@ async fn main() -> Result<()> {
                         let active_uploads = active_uploads.clone();
                         let multi_progress = multi_progress.clone();
                         let status_bar = status_bar.clone();
+                        let details = details.clone();
+                        let tags = tags.clone();
 
                         async move {
                             // Helper to log messages
@@ -364,6 +422,8 @@ async fn main() -> Result<()> {
                                 parallel,
                                 on_upload_initiated: Some(callback),
                                 progress_bar: Some(pb.clone()),
+                                details: details.clone(),
+                                tags: tags.clone(),
                             };
 
                             let result = upload_file(&config, &file_path, options)

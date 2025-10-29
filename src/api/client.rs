@@ -1,5 +1,6 @@
 use crate::config::Config;
 use crate::error::{Error, Result};
+use crate::{ci_metadata::CiMetadata, metadata::VcsMetadata};
 use log::{debug, info};
 use reqwest::Client as HttpClient;
 use serde::{Deserialize, Serialize};
@@ -92,6 +93,25 @@ impl std::str::FromStr for BuildPlatform {
     }
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct BuildDetails {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub vcs: Option<VcsMetadata>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ci: Option<CiMetadata>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub upload: Option<UploadInfo>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct UploadInfo {
+    pub method: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cli_version: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub uploader: Option<String>,
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "snake_case")]
 pub struct UploadRequest {
@@ -108,6 +128,10 @@ pub struct UploadRequest {
     pub deletion_policy: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub upload_timeout: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub details: Option<BuildDetails>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tags: Option<Vec<String>>,
 }
 
 /// Response from the server for a single-part upload request
@@ -203,6 +227,8 @@ impl Client {
         upload_timeout: Option<u32>,
         auto_delete: bool,
         deletion_policy: Option<String>,
+        details: Option<BuildDetails>,
+        tags: Option<Vec<String>>,
     ) -> Result<SinglePartUploadResponse> {
         let url = format!("{}/upload", self.config.base_upload_url());
         debug!("Requesting upload URL from: {url}");
@@ -217,6 +243,8 @@ impl Client {
             upload_timeout,
             auto_delete: Some(auto_delete),
             deletion_policy,
+            details,
+            tags,
         };
 
         let response = self
@@ -386,6 +414,8 @@ impl Client {
         upload_timeout: Option<u32>,
         auto_delete: bool,
         deletion_policy: Option<String>,
+        details: Option<BuildDetails>,
+        tags: Option<Vec<String>>,
     ) -> Result<MultipartUploadResponse> {
         let url = format!("{}/upload", self.config.base_upload_url());
         debug!("Initiating multipart upload at: {url}");
@@ -400,6 +430,8 @@ impl Client {
             auto_delete: Some(auto_delete),
             deletion_policy,
             upload_timeout,
+            details,
+            tags,
         };
 
         let response = self

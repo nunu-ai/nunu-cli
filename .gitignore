@@ -26,3 +26,4 @@ logs
 
 .env
 config.json
+internal_docs/

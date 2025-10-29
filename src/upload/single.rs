@@ -44,6 +44,8 @@ pub async fn upload_single_part(
             options.upload_timeout,
             options.auto_delete,
             options.deletion_policy.clone(),
+            options.details.clone(),
+            options.tags.clone(),
         )
         .await?;
 

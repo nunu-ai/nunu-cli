@@ -1,6 +1,7 @@
 pub mod multipart;
 pub mod single;
 
+use crate::api::client::BuildDetails;
 use crate::config::Config;
 use crate::error::Result;
 use indicatif::ProgressBar;
@@ -26,6 +27,10 @@ pub struct UploadOptions {
     pub on_upload_initiated: Option<OnUploadInitiated>,
     /// Optional progress bar for tracking upload progress
     pub progress_bar: Option<ProgressBar>,
+    /// Optional build details (VCS, CI/CD metadata)
+    pub details: Option<BuildDetails>,
+    /// Optional tags for the build
+    pub tags: Option<Vec<String>>,
 }
 
 impl std::fmt::Debug for UploadOptions {
@@ -41,6 +46,8 @@ impl std::fmt::Debug for UploadOptions {
             .field("parallel", &self.parallel)
             .field("on_upload_initiated", &self.on_upload_initiated.is_some())
             .field("progress_bar", &self.progress_bar.is_some())
+            .field("details", &self.details.is_some())
+            .field("tags", &self.tags.is_some())
             .finish()
     }
 }

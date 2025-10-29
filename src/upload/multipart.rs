@@ -51,6 +51,8 @@ pub async fn upload_multipart(
             options.upload_timeout,
             options.auto_delete,
             options.deletion_policy.clone(),
+            options.details.clone(),
+            options.tags.clone(),
         )
         .await?;
 
