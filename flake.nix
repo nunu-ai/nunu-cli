@@ -105,8 +105,8 @@
               ]
             }"
 
-            cur_version=$(convco version --prefix nunu-cli-v)
-            version=$(convco version --bump --prefix nunu-cli-v)
+            cur_version=$(convco version --prefix v)
+            version=$(convco version --bump --prefix v)
             if [ "$cur_version" = "$version" ]; then
               echo "nunu-cli does not require version bump from v$version"
               exit 0

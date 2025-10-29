@@ -1,6 +1,6 @@
 [package]
 name = "nunu-cli"
-version = "0.1.6"
+version = "0.1.7"
 edition = "2024"
 publish = false
 authors = ["Nunu.ai"]
@@ -74,9 +74,9 @@ panic = "abort"
 pre-release-hook = [
   "sh",
   "-c",
-  "convco changelog --unreleased {{version}} --prefix nunu-cli-v --skip-empty -o CHANGELOG.md && git add CHANGELOG.md",
+  "convco changelog --unreleased {{version}} --prefix v --skip-empty -o CHANGELOG.md && git add CHANGELOG.md",
 ]
-tag-name = "nunu-cli-v{{version}}"
+tag-name = "v{{version}}"
 tag-message = "chore: release nunu-cli version {{version}}"
 pre-release-commit-message = "chore: release nunu-cli v{{version}}"
 publish = false
