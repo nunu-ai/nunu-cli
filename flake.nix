@@ -35,11 +35,16 @@
 
         toolchain =
           with fenix.packages.${system};
-          combine [
-            default.toolchain
-            stable.rust-src
-            targets.x86_64-pc-windows-gnu.latest.rust-std
-          ];
+          combine (
+            [
+              default.toolchain
+              stable.rust-src
+            ]
+            ++ lib.optionals pkgs.stdenv.isLinux [
+              targets.x86_64-pc-windows-gnu.latest.rust-std
+              targets.x86_64-unknown-linux-musl.latest.rust-std
+            ]
+          );
 
         inherit (pkgs) lib;
 
@@ -52,20 +57,18 @@
           strictDeps = true;
           doCheck = false;
 
-          buildInputs = [
-            # Add additional build inputs here
-          ]
-          ++ lib.optionals pkgs.stdenv.isDarwin [
-            pkgs.libiconv
-          ];
+          buildInputs =
+            [ ]
+            ++ lib.optionals pkgs.stdenv.isDarwin [
+              pkgs.libiconv
+            ];
         };
 
         # Build *just* the cargo dependencies, so we can reuse
         # all of that work (e.g. via cachix) when running in CI
         cargoArtifacts = craneLib.buildDepsOnly commonArgs;
 
-        # Build the actual crate itself, reusing the dependency
-        # artifacts from above.
+        # Regular build (for local development and Darwin)
         nunu-cli = craneLib.buildPackage (
           commonArgs
           // {
@@ -73,25 +76,40 @@
           }
         );
 
-        nunu-cli-windows = craneLib.buildPackage (
-          commonArgs
-          // {
-            inherit cargoArtifacts;
-            CARGO_BUILD_TARGET = "x86_64-pc-windows-gnu";
+        # Static Linux build (Linux only - for releases)
+        nunu-cli-linux-musl = lib.optionalAttrs pkgs.stdenv.isLinux (
+          craneLib.buildPackage (
+            commonArgs
+            // {
+              inherit cargoArtifacts;
+              CARGO_BUILD_TARGET = "x86_64-unknown-linux-musl";
+              CARGO_BUILD_RUSTFLAGS = "-C target-feature=+crt-static";
+            }
+          )
+        );
 
-            # fixes issues related to libring
-            TARGET_CC = "${pkgs.pkgsCross.mingwW64.stdenv.cc}/bin/${pkgs.pkgsCross.mingwW64.stdenv.cc.targetPrefix}cc";
+        # Windows build (Linux only - cross-compilation)
+        nunu-cli-windows = lib.optionalAttrs pkgs.stdenv.isLinux (
+          craneLib.buildPackage (
+            commonArgs
+            // {
+              inherit cargoArtifacts;
+              CARGO_BUILD_TARGET = "x86_64-pc-windows-gnu";
 
-            #fixes issues related to openssl
-            OPENSSL_DIR = "${pkgs.openssl.dev}";
-            OPENSSL_LIB_DIR = "${pkgs.openssl.out}/lib";
-            OPENSSL_INCLUDE_DIR = "${pkgs.openssl.dev}/include/";
+              # fixes issues related to libring
+              TARGET_CC = "${pkgs.pkgsCross.mingwW64.stdenv.cc}/bin/${pkgs.pkgsCross.mingwW64.stdenv.cc.targetPrefix}cc";
 
-            depsBuildBuild = with pkgs; [
-              pkgsCross.mingwW64.stdenv.cc
-              pkgsCross.mingwW64.windows.pthreads
-            ];
-          }
+              # fixes issues related to openssl
+              OPENSSL_DIR = "${pkgs.openssl.dev}";
+              OPENSSL_LIB_DIR = "${pkgs.openssl.out}/lib";
+              OPENSSL_INCLUDE_DIR = "${pkgs.openssl.dev}/include/";
+
+              depsBuildBuild = with pkgs; [
+                pkgsCross.mingwW64.stdenv.cc
+                pkgsCross.mingwW64.windows.pthreads
+              ];
+            }
+          )
         );
 
         scripts = {
@@ -118,8 +136,6 @@
       in
       {
         checks = {
-          # Build the crate as part of `nix flake check` for convenience
-
           # Run clippy (and deny all warnings) on the crate source
           nunu-cli-clippy = craneLib.cargoClippy (
             commonArgs
@@ -166,19 +182,57 @@
           );
         };
 
-        packages = {
-          default = nunu-cli;
-          windows = nunu-cli-windows;
+        packages =
+          {
+            default = nunu-cli;
 
-          release-artifacts = pkgs.symlinkJoin {
-            name = "nunu-cli-release";
-            paths = [
-              nunu-cli
-              nunu-cli-windows
-            ];
+            # Platform-specific release artifacts
+            release-artifacts =
+              if pkgs.stdenv.isLinux then
+                # On Linux: build static Linux binary + Windows binary
+                pkgs.stdenv.mkDerivation {
+                  name = "nunu-cli-release";
+
+                  buildInputs = [
+                    nunu-cli-linux-musl
+                    nunu-cli-windows
+                  ];
+
+                  unpackPhase = "true";
+
+                  installPhase = ''
+                    mkdir -p $out/bin
+
+                    # Copy static Linux binary
+                    cp ${nunu-cli-linux-musl}/bin/nunu-cli $out/bin/nunu-cli
+
+                    # Copy Windows binary
+                    cp ${nunu-cli-windows}/bin/nunu-cli.exe $out/bin/nunu-cli.exe
+                  '';
+                }
+              else
+                # On macOS: just build native macOS binary
+                pkgs.stdenv.mkDerivation {
+                  name = "nunu-cli-release";
+
+                  buildInputs = [ nunu-cli ];
+
+                  unpackPhase = "true";
+
+                  installPhase = ''
+                    mkdir -p $out/bin
+
+                    # Copy native binary
+                    cp ${nunu-cli}/bin/nunu-cli $out/bin/nunu-cli
+                  '';
+                };
+          }
+          // scripts
+          // lib.optionalAttrs pkgs.stdenv.isLinux {
+            # These packages only available on Linux
+            linux-musl = nunu-cli-linux-musl;
+            windows = nunu-cli-windows;
           };
-        }
-        // scripts;
 
         apps.default = flake-utils.lib.mkApp {
           drv = nunu-cli;
