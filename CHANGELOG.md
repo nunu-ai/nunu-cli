@@ -1,8 +1,38 @@
 # Changelog
 
-## [v0.1.7](https://github.com/nunu-ai/nunu-cli/compare/v0.1.6...7a61dd1aa8b2d3d8ea97e0dddf28dd0f18c8cfa7) (2025-10-29)
+## [v0.1.10](https://github.com/nunu-ai/nunu-cli/compare/v0.1.9...be7663b3eca8dd608796e7b8bf835e749fe84098) (2025-10-29)
 
 ### Features
+
+* trigger release
+([be7663b](https://github.com/nunu-ai/nunu-cli/commit/be7663b3eca8dd608796e7b8bf835e749fe84098))
+
+### [v0.1.9](https://github.com/nunu-ai/nunu-cli/compare/v0.1.8...v0.1.9) (2025-10-29)
+
+#### Features
+
+* trigger release
+([cebbf1b](https://github.com/nunu-ai/nunu-cli/commit/cebbf1b758218b7ccfdf4e28ef117ce30c3306b7))
+* static linked linux
+([e5acf27](https://github.com/nunu-ai/nunu-cli/commit/e5acf27e92d5290dcb2d8df0e12d99b85914ade6))
+
+#### Fixes
+
+* version
+([f7d5a30](https://github.com/nunu-ai/nunu-cli/commit/f7d5a305b22d93904b9aad048c46dd0beeb7888e))
+* version
+([502bf85](https://github.com/nunu-ai/nunu-cli/commit/502bf859cb7116b9b1c63f9266253328790d304d))
+
+### [v0.1.8](https://github.com/nunu-ai/nunu-cli/compare/v0.1.7...v0.1.8) (2025-10-29)
+
+#### Features
+
+* static linked linux
+([3be8087](https://github.com/nunu-ai/nunu-cli/commit/3be8087076b44916f1a4c55733cac8d749005933))
+
+### [v0.1.7](https://github.com/nunu-ai/nunu-cli/compare/v0.1.6...v0.1.7) (2025-10-29)
+
+#### Features
 
 * trigger release
 ([7a61dd1](https://github.com/nunu-ai/nunu-cli/commit/7a61dd1aa8b2d3d8ea97e0dddf28dd0f18c8cfa7))
