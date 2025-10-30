@@ -29,22 +29,35 @@ Platform is automatically detected from file extension.
 
 ## Usage
 ```bash
-# Basic upload
+# Single file
 nunu-cli upload <file> --name "Build Name"
 
+# Pattern matching when filename is unknown (common in CI/CD)
+nunu-cli upload "build/app-v*.apk" --name "Android Release"
+nunu-cli upload "dist/myapp-*.exe" --name "Windows Build"
+
 # With options
-nunu-cli upload build/app.exe \
+nunu-cli upload "build/app-*.exe" \
   --name "Windows Build" \
   --description "Release build" \
   --auto-delete \
   --tags "version:1.2.3,env:prod"
 
-# Multiple files
-nunu-cli upload build/*.apk --name "Android Builds"
-
 # Show all options
 nunu-cli upload --help
 ```
+
+### File Pattern Matching
+
+Use glob patterns when you don't know the exact filename:
+
+- `*` - Matches any characters: `app-v*.apk`, `build-*.zip`
+- `?` - Matches single character: `app-?.apk`
+- `[...]` - Matches character sets: `app-[123].apk`, `build-[0-9].exe`
+
+Common use case: Build tools add version numbers or timestamps to filenames. Pattern matching lets you upload without knowing the exact name.
+
+If multiple files match, each becomes a separate build with the filename appended to your name template.
 
 ### Key Options
 
@@ -108,7 +121,7 @@ No additional configuration required.
   env:
     NUNU_API_TOKEN: ${{ secrets.NUNU_API_TOKEN }}
     NUNU_PROJECT_ID: ${{ secrets.NUNU_PROJECT_ID }}
-  run: nunu-cli upload build/app.apk --name "Build ${{ github.run_number }}"
+  run: nunu-cli upload "build/app-*.apk" --name "Build ${{ github.run_number }}"
 ```
 
 For convenience in GitHub Actions, use our [GitHub Action](https://github.com/nunu-ai/upload-build-action) which wraps the CLI.
@@ -128,6 +141,7 @@ Works with any CI/CD system. See [documentation](https://docs.nunu.ai) for examp
 ## Features
 
 - ✅ Automatic platform detection from file extension
+- ✅ File pattern matching with glob patterns
 - ✅ Large file support (multipart uploads for files >3GB)
 - ✅ Parallel uploads for speed
 - ✅ Automatic metadata collection from git and CI/CD environments

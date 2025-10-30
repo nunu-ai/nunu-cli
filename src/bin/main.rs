@@ -50,7 +50,7 @@ enum Commands {
     /// Upload a build artifact
     #[command(override_usage = "<FILES>... [OPTIONS]")]
     Upload {
-        /// Files to upload (can specify multiple files)
+        /// Files to upload (supports glob patterns like *.apk, app?.exe, build[0-9].ipa)
         #[arg(value_name = "FILES", num_args = 1..)]
         files: Vec<String>,
 
