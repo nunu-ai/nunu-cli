@@ -1,8 +1,15 @@
 # Changelog
 
-## [v0.1.10](https://github.com/nunu-ai/nunu-cli/compare/v0.1.9...be7663b3eca8dd608796e7b8bf835e749fe84098) (2025-10-29)
+## [v0.1.11](https://github.com/nunu-ai/nunu-cli/compare/v0.1.10...98f71204b6c4d22e0bf01c2261c208cf4ad5f969) (2025-10-30)
 
 ### Features
+
+* add debug logs, update readme
+([98f7120](https://github.com/nunu-ai/nunu-cli/commit/98f71204b6c4d22e0bf01c2261c208cf4ad5f969))
+
+### [v0.1.10](https://github.com/nunu-ai/nunu-cli/compare/v0.1.9...v0.1.10) (2025-10-29)
+
+#### Features
 
 * trigger release
 ([be7663b](https://github.com/nunu-ai/nunu-cli/commit/be7663b3eca8dd608796e7b8bf835e749fe84098))
