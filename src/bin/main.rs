@@ -1,6 +1,7 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use futures::stream::{self, StreamExt};
+use glob::glob;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use log::{debug, error, info, warn};
 use nunu_cli::{
@@ -150,6 +151,72 @@ fn generate_build_name(template: &str, file_path: &str, file_count: usize) -> St
     }
 }
 
+/// Expand glob patterns to file paths
+///
+/// This function handles both regular file paths and glob patterns.
+/// If a pattern doesn't match any files, it's treated as a literal path
+/// (which will fail later with a clear error).
+///
+/// # Errors
+///
+/// Returns an error if glob pattern parsing fails
+fn expand_globs(patterns: &[String]) -> Result<Vec<String>> {
+    let mut expanded_files = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+
+    for pattern in patterns {
+        // Check if pattern contains glob characters
+        if pattern.contains('*') || pattern.contains('?') || pattern.contains('[') {
+            debug!("Expanding glob pattern: {pattern}");
+
+            match glob(pattern) {
+                Ok(paths) => {
+                    let mut matched_any = false;
+                    for entry in paths {
+                        match entry {
+                            Ok(path) => {
+                                matched_any = true;
+                                let path_str = path.to_string_lossy().to_string();
+
+                                // Only add files (skip directories) and avoid duplicates
+                                if path.is_file() && seen.insert(path_str.clone()) {
+                                    expanded_files.push(path_str);
+                                }
+                            }
+                            Err(e) => {
+                                warn!("Error reading glob entry: {e}");
+                            }
+                        }
+                    }
+
+                    if matched_any {
+                        debug!(
+                            "Pattern '{pattern}' matched {} file(s)",
+                            expanded_files.len() - (expanded_files.len() - seen.len())
+                        );
+                    } else {
+                        warn!("Pattern '{pattern}' did not match any files");
+                    }
+                }
+                Err(e) => {
+                    return Err(anyhow::anyhow!("Invalid glob pattern '{pattern}': {e}"));
+                }
+            }
+        } else {
+            // Not a glob pattern, use as-is (deduplicate)
+            if seen.insert(pattern.clone()) {
+                expanded_files.push(pattern.clone());
+            }
+        }
+    }
+
+    if expanded_files.is_empty() {
+        Err(anyhow::anyhow!("No files matched the provided patterns"))
+    } else {
+        Ok(expanded_files)
+    }
+}
+
 #[allow(clippy::too_many_lines)]
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -200,6 +267,13 @@ async fn main() -> Result<()> {
         } => {
             if files.is_empty() {
                 return Err(anyhow::anyhow!("No files specified for upload"));
+            }
+
+            // Expand glob patterns to actual file paths
+            let files = expand_globs(&files)?;
+
+            if cli.verbose > 0 {
+                info!("Found {} file(s) to upload", files.len());
             }
 
             // Validate parallel value
