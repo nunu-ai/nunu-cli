@@ -85,6 +85,7 @@ nunu-cli --config /path/to/config.json upload build.exe --name "Build"
 
 ### Global Options
 
+- `--help` - Display a help message with all options and usage.
 - `-v, --verbose` - Enable verbose output. Can be used multiple times for increased verbosity:
   - `-v`: INFO level (general progress)
   - `-vv`: DEBUG level (detailed debugging)
@@ -104,6 +105,7 @@ nunu-cli --config /path/to/config.json upload build.exe --name "Build"
 - `--deletion-policy <POLICY>` - Deletion policy: `least_recent` (default) or `oldest`
 - `--force-multipart` - Force multipart upload even for small files
 - `--parallel <N>` - Number of parallel uploads/parts (1-32, default: 4)
+- `--tags <TAGS>` - List of user-defined tags (comma-separated)
 
 ## Platform Detection
 

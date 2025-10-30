@@ -36,7 +36,7 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           nix run .#bump-version
 
-      - name: Pull new tag  # ADD THIS STEP
+      - name: Pull new tag
         run: |
           echo "Fetching new tags and commits..."
           git fetch --tags origin

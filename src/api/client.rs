@@ -112,7 +112,7 @@ pub struct UploadInfo {
     pub uploader: Option<String>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Debug)]
 #[serde(rename_all = "snake_case")]
 pub struct UploadRequest {
     pub name: String,
@@ -246,6 +246,8 @@ impl Client {
             details,
             tags,
         };
+
+        debug!("Upload request: {request:?}");
 
         let response = self
             .http
@@ -433,6 +435,8 @@ impl Client {
             details,
             tags,
         };
+
+        debug!("Upload request: {request:?}");
 
         let response = self
             .http
