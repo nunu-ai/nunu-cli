@@ -1,8 +1,15 @@
 # Changelog
 
-## [v0.1.14](https://github.com/nunu-ai/nunu-cli/compare/v0.1.13...f2a2f12e58dd5c176369b7674afbdecda53254dd) (2025-10-31)
+## [v0.1.15](https://github.com/nunu-ai/nunu-cli/compare/v0.1.14...1d77df207a8e25e3a27be1f56bbf9cb686f7a592) (2025-10-31)
 
 ### Features
+
+* add macos binary to release
+([1d77df2](https://github.com/nunu-ai/nunu-cli/commit/1d77df207a8e25e3a27be1f56bbf9cb686f7a592))
+
+### [v0.1.14](https://github.com/nunu-ai/nunu-cli/compare/v0.1.13...v0.1.14) (2025-10-31)
+
+#### Features
 
 * remove version from filename for convenience
 ([f2a2f12](https://github.com/nunu-ai/nunu-cli/commit/f2a2f12e58dd5c176369b7674afbdecda53254dd))
