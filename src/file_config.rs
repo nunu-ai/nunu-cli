@@ -25,8 +25,24 @@ impl FileConfig {
     /// Returns an error if the file cannot be read or parsed
     pub fn load_from_path(path: &PathBuf) -> Result<Self> {
         debug!("Loading config from: {}", path.display());
-        let contents = std::fs::read_to_string(path)?;
-        let config: FileConfig = serde_json::from_str(&contents)?;
+
+        let contents = std::fs::read_to_string(path).map_err(|e| {
+            crate::error::Error::ConfigError(format!(
+                "Failed to read config file '{}': {}",
+                path.display(),
+                e
+            ))
+        })?;
+
+        let config: FileConfig = serde_json::from_str(&contents).map_err(|e| {
+            crate::error::Error::ConfigError(format!(
+                "Failed to parse config file '{}' as valid JSON: {}\n\
+                 Please check for syntax errors (missing/extra commas, quotes, brackets, etc.)",
+                path.display(),
+                e
+            ))
+        })?;
+
         Ok(config)
     }
 
@@ -48,21 +64,14 @@ impl FileConfig {
         let project_paths = vec![
             PathBuf::from("./nunu.json"),
             PathBuf::from("./.nunu/config.json"),
-            PathBuf::from("./config.json"),
-            PathBuf::from("./.config.json"),
         ];
 
         for path in &project_paths {
             if path.exists() {
-                match Self::load_from_path(path) {
-                    Ok(config) => {
-                        debug!("Loaded config from project directory: {}", path.display());
-                        return Ok(config);
-                    }
-                    Err(e) => {
-                        debug!("Failed to load config from {}: {}", path.display(), e);
-                    }
-                }
+                // If config file exists, it must be valid - fail fast with clear error
+                return Self::load_from_path(path).inspect(|_config| {
+                    debug!("Loaded config from project directory: {}", path.display());
+                });
             }
         }
 
@@ -70,22 +79,13 @@ impl FileConfig {
         if let Some(proj_dirs) = ProjectDirs::from("", "", "nunu") {
             let user_config_path = proj_dirs.config_dir().join("config.json");
             if user_config_path.exists() {
-                match Self::load_from_path(&user_config_path) {
-                    Ok(config) => {
-                        debug!(
-                            "Loaded config from user directory: {}",
-                            user_config_path.display()
-                        );
-                        return Ok(config);
-                    }
-                    Err(e) => {
-                        debug!(
-                            "Failed to load config from {}: {}",
-                            user_config_path.display(),
-                            e
-                        );
-                    }
-                }
+                // If config file exists, it must be valid - fail fast with clear error
+                return Self::load_from_path(&user_config_path).inspect(|_config| {
+                    debug!(
+                        "Loaded config from user directory: {}",
+                        user_config_path.display()
+                    );
+                });
             }
         }
 
