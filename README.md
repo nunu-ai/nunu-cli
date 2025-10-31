@@ -7,20 +7,34 @@ CLI tool for uploading build artifacts to nunu.ai.
 Download the latest release from [GitHub Releases](https://github.com/nunu-ai/nunu-cli/releases).
 
 ### Linux
-```bash
-# Download the latest version (check releases page for latest version number)
-VERSION=0.1.13  # Replace with latest version
 
-wget https://github.com/nunu-ai/nunu-cli/releases/download/v${VERSION}/nunu-cli-linux-x86_64
+**Latest version (recommended):**
+```bash
+curl -L -O https://github.com/nunu-ai/nunu-cli/releases/latest/download/nunu-cli-linux-x86_64
+chmod +x nunu-cli-linux-x86_64
+sudo mv nunu-cli-linux-x86_64 /usr/local/bin/nunu-cli
+```
+
+**Specific version:**
+```bash
+VERSION=0.1.15  # Replace with desired version
+curl -L -O https://github.com/nunu-ai/nunu-cli/releases/download/v${VERSION}/nunu-cli-linux-x86_64
 chmod +x nunu-cli-linux-x86_64
 sudo mv nunu-cli-linux-x86_64 /usr/local/bin/nunu-cli
 ```
 
 ### macOS
-```bash
-# Download the latest version (check releases page for latest version number)
-VERSION=0.1.13  # Replace with latest version
 
+**Latest version (recommended):**
+```bash
+curl -L -O https://github.com/nunu-ai/nunu-cli/releases/latest/download/nunu-cli-macos-x86_64
+chmod +x nunu-cli-macos-x86_64
+sudo mv nunu-cli-macos-x86_64 /usr/local/bin/nunu-cli
+```
+
+**Specific version:**
+```bash
+VERSION=0.1.15  # Replace with desired version
 curl -L -O https://github.com/nunu-ai/nunu-cli/releases/download/v${VERSION}/nunu-cli-macos-x86_64
 chmod +x nunu-cli-macos-x86_64
 sudo mv nunu-cli-macos-x86_64 /usr/local/bin/nunu-cli
@@ -28,9 +42,9 @@ sudo mv nunu-cli-macos-x86_64 /usr/local/bin/nunu-cli
 
 ### Windows
 
-Download `nunu-cli-windows-x86_64.exe` from the [latest release](https://github.com/nunu-ai/nunu-cli/releases/latest) and rename to `nunu-cli.exe`.
+**Latest version:** Download [nunu-cli-windows-x86_64.exe](https://github.com/nunu-ai/nunu-cli/releases/latest/download/nunu-cli-windows-x86_64.exe) and rename to `nunu-cli.exe`.
 
-**Find the latest version**: Check the [releases page](https://github.com/nunu-ai/nunu-cli/releases/latest).
+**Specific version:** Visit the [releases page](https://github.com/nunu-ai/nunu-cli/releases), select your version, and download `nunu-cli-windows-x86_64.exe`.
 
 ## Quick Start
 ```bash
