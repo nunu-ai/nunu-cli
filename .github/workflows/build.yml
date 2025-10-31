@@ -98,8 +98,8 @@ jobs:
       - name: Rename artifacts with version
         run: |
           VERSION=${{ needs.release.outputs.version }}
-          mv artifacts/nunu-cli artifacts/nunu-cli-v${VERSION}-linux-x86_64
-          mv artifacts/nunu-cli.exe artifacts/nunu-cli-v${VERSION}-windows-x86_64.exe
+          mv artifacts/nunu-cli artifacts/nunu-cli-linux-x86_64
+          mv artifacts/nunu-cli.exe artifacts/nunu-cli-windows-x86_64.exe
 
       - name: Create Release
         uses: softprops/action-gh-release@v1
@@ -109,6 +109,6 @@ jobs:
           draft: false
           prerelease: false
           files: |
-            artifacts/nunu-cli-v${{ needs.release.outputs.version }}-linux-x86_64
-            artifacts/nunu-cli-v${{ needs.release.outputs.version }}-windows-x86_64.exe
+            artifacts/nunu-cli-linux-x86_64
+            artifacts/nunu-cli-windows-x86_64.exe
           generate_release_notes: true
