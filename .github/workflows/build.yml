@@ -60,14 +60,14 @@ jobs:
             echo "ℹ No release tag created (no version bump needed)"
           fi
 
-  post-release-build:
+  post-release-build-linux:
     if: github.ref == 'refs/heads/main' && needs.release.outputs.released == 'true'
     runs-on: [self-hosted, nix, Linux]
     needs: [release]
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: v${{ needs.release.outputs.version }}  # CHANGED: Checkout the specific tag
+          ref: v${{ needs.release.outputs.version }}
 
       - name: Build release artifacts
         run: nix build .#release-artifacts --refresh
@@ -75,31 +75,57 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: release-binaries
+          name: release-binaries-linux
           path: |
             result/bin/nunu-cli
             result/bin/nunu-cli.exe
+
+  post-release-build-macos:
+    if: github.ref == 'refs/heads/main' && needs.release.outputs.released == 'true'
+    runs-on: [self-hosted, nix, macOS]
+    needs: [release]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v${{ needs.release.outputs.version }}
+
+      - name: Build release artifacts
+        run: nix build .#release-artifacts --refresh
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-binaries-macos
+          path: |
+            result/bin/nunu-cli
 
   create-github-release:
     if: github.ref == 'refs/heads/main' && needs.release.outputs.released == 'true'
     permissions:
       contents: "write"
     runs-on: [self-hosted, nix, Linux]
-    needs: [release, post-release-build]
+    needs: [release, post-release-build-linux, post-release-build-macos]
     steps:
       - uses: actions/checkout@v4
 
-      - name: Download all artifacts
+      - name: Download Linux artifacts
         uses: actions/download-artifact@v4
         with:
-          name: release-binaries
+          name: release-binaries-linux
           path: artifacts
+
+      - name: Download macOS artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: release-binaries-macos
+          path: artifacts-macos
 
       - name: Rename artifacts with version
         run: |
           VERSION=${{ needs.release.outputs.version }}
           mv artifacts/nunu-cli artifacts/nunu-cli-linux-x86_64
           mv artifacts/nunu-cli.exe artifacts/nunu-cli-windows-x86_64.exe
+          mv artifacts-macos/nunu-cli artifacts/nunu-cli-macos-x86_64
 
       - name: Create Release
         uses: softprops/action-gh-release@v1
@@ -111,4 +137,5 @@ jobs:
           files: |
             artifacts/nunu-cli-linux-x86_64
             artifacts/nunu-cli-windows-x86_64.exe
+            artifacts/nunu-cli-macos-x86_64
           generate_release_notes: true

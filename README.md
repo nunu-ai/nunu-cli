@@ -8,29 +8,29 @@ Download the latest release from [GitHub Releases](https://github.com/nunu-ai/nu
 
 ### Linux
 ```bash
-# Replace VERSION with the actual version (e.g., 0.1.13)
-VERSION=0.1.13
+# Download the latest version (check releases page for latest version number)
+VERSION=0.1.13  # Replace with latest version
 
-wget https://github.com/nunu-ai/nunu-cli/releases/download/v${VERSION}/nunu-cli-v${VERSION}-linux-x86_64
-chmod +x nunu-cli-v${VERSION}-linux-x86_64
-sudo mv nunu-cli-v${VERSION}-linux-x86_64 /usr/local/bin/nunu-cli
+wget https://github.com/nunu-ai/nunu-cli/releases/download/v${VERSION}/nunu-cli-linux-x86_64
+chmod +x nunu-cli-linux-x86_64
+sudo mv nunu-cli-linux-x86_64 /usr/local/bin/nunu-cli
 ```
 
 ### macOS
 ```bash
-# Replace VERSION with the actual version (e.g., 0.1.13)
-VERSION=0.1.13
+# Download the latest version (check releases page for latest version number)
+VERSION=0.1.13  # Replace with latest version
 
-curl -L -O https://github.com/nunu-ai/nunu-cli/releases/download/v${VERSION}/nunu-cli-v${VERSION}-macos-x86_64
-chmod +x nunu-cli-v${VERSION}-macos-x86_64
-sudo mv nunu-cli-v${VERSION}-macos-x86_64 /usr/local/bin/nunu-cli
+curl -L -O https://github.com/nunu-ai/nunu-cli/releases/download/v${VERSION}/nunu-cli-macos-x86_64
+chmod +x nunu-cli-macos-x86_64
+sudo mv nunu-cli-macos-x86_64 /usr/local/bin/nunu-cli
 ```
 
 ### Windows
 
-Download `nunu-cli-v{VERSION}-windows-x86_64.exe` from [releases](https://github.com/nunu-ai/nunu-cli/releases) and rename to `nunu-cli.exe`.
+Download `nunu-cli-windows-x86_64.exe` from the [latest release](https://github.com/nunu-ai/nunu-cli/releases/latest) and rename to `nunu-cli.exe`.
 
-**Find the latest version**: Check the [releases page](https://github.com/nunu-ai/nunu-cli/releases).
+**Find the latest version**: Check the [releases page](https://github.com/nunu-ai/nunu-cli/releases/latest).
 
 ## Quick Start
 ```bash
