@@ -1,8 +1,15 @@
 # Changelog
 
-## [v0.1.13](https://github.com/nunu-ai/nunu-cli/compare/v0.1.12...1eaa43166894ccb3ccd91b86a83bdddb26b26a08) (2025-10-30)
+## [v0.1.14](https://github.com/nunu-ai/nunu-cli/compare/v0.1.13...f2a2f12e58dd5c176369b7674afbdecda53254dd) (2025-10-31)
 
 ### Features
+
+* remove version from filename for convenience
+([f2a2f12](https://github.com/nunu-ai/nunu-cli/commit/f2a2f12e58dd5c176369b7674afbdecda53254dd))
+
+### [v0.1.13](https://github.com/nunu-ai/nunu-cli/compare/v0.1.12...v0.1.13) (2025-10-30)
+
+#### Features
 
 * support globbing
 ([1eaa431](https://github.com/nunu-ai/nunu-cli/commit/1eaa43166894ccb3ccd91b86a83bdddb26b26a08))
