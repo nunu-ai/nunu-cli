@@ -1,8 +1,17 @@
 # Changelog
 
-## [v0.1.15](https://github.com/nunu-ai/nunu-cli/compare/v0.1.14...1d77df207a8e25e3a27be1f56bbf9cb686f7a592) (2025-10-31)
+## [v0.1.16](https://github.com/nunu-ai/nunu-cli/compare/v0.1.15...c61f5846b70d288a4d66b2e471804d42d7b39bd5) (2025-11-03)
 
 ### Features
+
+* automatically detect and attach arch to filenames
+([c61f584](https://github.com/nunu-ai/nunu-cli/commit/c61f5846b70d288a4d66b2e471804d42d7b39bd5))
+* change automatic config path discovery
+([87e5f5b](https://github.com/nunu-ai/nunu-cli/commit/87e5f5bfc1b28b8e48415384856c07be9926c685))
+
+### [v0.1.15](https://github.com/nunu-ai/nunu-cli/compare/v0.1.14...v0.1.15) (2025-10-31)
+
+#### Features
 
 * add macos binary to release
 ([1d77df2](https://github.com/nunu-ai/nunu-cli/commit/1d77df207a8e25e3a27be1f56bbf9cb686f7a592))
