@@ -27,17 +27,17 @@ sudo mv nunu-cli-linux-x86_64 /usr/local/bin/nunu-cli
 
 **Latest version (recommended):**
 ```bash
-curl -L -O https://github.com/nunu-ai/nunu-cli/releases/latest/download/nunu-cli-macos-aarch64
-chmod +x nunu-cli-macos-x86_64
-sudo mv nunu-cli-macos-x86_64 /usr/local/bin/nunu-cli
+curl -L -O https://github.com/nunu-ai/nunu-cli/releases/latest/download/nunu-cli-macos-arm64
+chmod +x nunu-cli-macos-arm64
+sudo mv nunu-cli-macos-arm64 /usr/local/bin/nunu-cli
 ```
 
 **Specific version:**
 ```bash
 VERSION=0.1.15  # Replace with desired version
-curl -L -O https://github.com/nunu-ai/nunu-cli/releases/download/v${VERSION}/nunu-cli-macos-aarch64
-chmod +x nunu-cli-macos-x86_64
-sudo mv nunu-cli-macos-x86_64 /usr/local/bin/nunu-cli
+curl -L -O https://github.com/nunu-ai/nunu-cli/releases/download/v${VERSION}/nunu-cli-macos-arm64
+chmod +x nunu-cli-macos-arm64
+sudo mv nunu-cli-macos-arm64 /usr/local/bin/nunu-cli
 ```
 
 ### Windows
