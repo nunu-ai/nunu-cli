@@ -64,10 +64,19 @@ jobs:
     if: github.ref == 'refs/heads/main' && needs.release.outputs.released == 'true'
     runs-on: [self-hosted, nix, Linux]
     needs: [release]
+    outputs:
+      arch: ${{ steps.detect-arch.outputs.arch }}
     steps:
       - uses: actions/checkout@v4
         with:
           ref: v${{ needs.release.outputs.version }}
+
+      - name: Detect architecture
+        id: detect-arch
+        run: |
+          ARCH=$(uname -m)
+          echo "arch=$ARCH" >> $GITHUB_OUTPUT
+          echo "Detected architecture: $ARCH"
 
       - name: Build release artifacts
         run: nix build .#release-artifacts --refresh
@@ -84,10 +93,19 @@ jobs:
     if: github.ref == 'refs/heads/main' && needs.release.outputs.released == 'true'
     runs-on: [self-hosted, nix, macOS]
     needs: [release]
+    outputs:
+      arch: ${{ steps.detect-arch.outputs.arch }}
     steps:
       - uses: actions/checkout@v4
         with:
           ref: v${{ needs.release.outputs.version }}
+
+      - name: Detect architecture
+        id: detect-arch
+        run: |
+          ARCH=$(uname -m)
+          echo "arch=$ARCH" >> $GITHUB_OUTPUT
+          echo "Detected architecture: $ARCH"
 
       - name: Build release artifacts
         run: nix build .#release-artifacts --refresh
@@ -123,9 +141,11 @@ jobs:
       - name: Rename artifacts with version
         run: |
           VERSION=${{ needs.release.outputs.version }}
-          mv artifacts/nunu-cli artifacts/nunu-cli-linux-x86_64
-          mv artifacts/nunu-cli.exe artifacts/nunu-cli-windows-x86_64.exe
-          mv artifacts-macos/nunu-cli artifacts/nunu-cli-macos-x86_64
+          LINUX_ARCH=${{ needs.post-release-build-linux.outputs.arch }}
+          MACOS_ARCH=${{ needs.post-release-build-macos.outputs.arch }}
+          mv artifacts/nunu-cli artifacts/nunu-cli-linux-${LINUX_ARCH}
+          mv artifacts/nunu-cli.exe artifacts/nunu-cli-windows-${LINUX_ARCH}.exe
+          mv artifacts-macos/nunu-cli artifacts/nunu-cli-macos-${MACOS_ARCH}
 
       - name: Create Release
         uses: softprops/action-gh-release@v1
@@ -135,7 +155,7 @@ jobs:
           draft: false
           prerelease: false
           files: |
-            artifacts/nunu-cli-linux-x86_64
-            artifacts/nunu-cli-windows-x86_64.exe
-            artifacts/nunu-cli-macos-x86_64
+            artifacts/nunu-cli-linux-*
+            artifacts/nunu-cli-windows-*.exe
+            artifacts/nunu-cli-macos-*
           generate_release_notes: true

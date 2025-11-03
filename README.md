@@ -27,7 +27,7 @@ sudo mv nunu-cli-linux-x86_64 /usr/local/bin/nunu-cli
 
 **Latest version (recommended):**
 ```bash
-curl -L -O https://github.com/nunu-ai/nunu-cli/releases/latest/download/nunu-cli-macos-x86_64
+curl -L -O https://github.com/nunu-ai/nunu-cli/releases/latest/download/nunu-cli-macos-aarch64
 chmod +x nunu-cli-macos-x86_64
 sudo mv nunu-cli-macos-x86_64 /usr/local/bin/nunu-cli
 ```
@@ -35,7 +35,7 @@ sudo mv nunu-cli-macos-x86_64 /usr/local/bin/nunu-cli
 **Specific version:**
 ```bash
 VERSION=0.1.15  # Replace with desired version
-curl -L -O https://github.com/nunu-ai/nunu-cli/releases/download/v${VERSION}/nunu-cli-macos-x86_64
+curl -L -O https://github.com/nunu-ai/nunu-cli/releases/download/v${VERSION}/nunu-cli-macos-aarch64
 chmod +x nunu-cli-macos-x86_64
 sudo mv nunu-cli-macos-x86_64 /usr/local/bin/nunu-cli
 ```
@@ -121,6 +121,15 @@ Create `nunu.json` in your project:
   "project_id": "your_project_id"
 }
 ```
+
+The CLI automatically searches for config files in the following order:
+1. `--config` flag (if specified)
+2. `./nunu.json` (project root)
+3. `./.nunu/config.json` (hidden directory in project root)
+4. `~/.config/nunu/config.json` (user-level config on Linux/macOS)
+5. `%APPDATA%/nunu/config.json` (user-level config on Windows)
+
+
 
 ## Automatic Metadata Collection
 
