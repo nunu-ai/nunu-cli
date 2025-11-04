@@ -114,8 +114,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: release-binaries-macos
-          path: |
-            result/bin/nunu-cli
+          path: result/bin/nunu-cli-*
 
   create-github-release:
     if: github.ref == 'refs/heads/main' && needs.release.outputs.released == 'true'
@@ -142,10 +141,18 @@ jobs:
         run: |
           VERSION=${{ needs.release.outputs.version }}
           LINUX_ARCH=${{ needs.post-release-build-linux.outputs.arch }}
-          MACOS_ARCH=${{ needs.post-release-build-macos.outputs.arch }}
           mv artifacts/nunu-cli artifacts/nunu-cli-linux-${LINUX_ARCH}
           mv artifacts/nunu-cli.exe artifacts/nunu-cli-windows-${LINUX_ARCH}.exe
-          mv artifacts-macos/nunu-cli artifacts/nunu-cli-macos-${MACOS_ARCH}
+
+          # Rename macOS binaries to include 'macos-' prefix
+          for file in artifacts-macos/nunu-cli-*; do
+            if [ -f "$file" ]; then
+              basename=$(basename "$file")
+              arch=${basename#nunu-cli-}
+              mv "$file" "artifacts/nunu-cli-macos-${arch}"
+              echo "Renamed $basename to nunu-cli-macos-${arch}"
+            fi
+          done
 
       - name: Create Release
         uses: softprops/action-gh-release@v1
