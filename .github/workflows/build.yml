@@ -144,8 +144,15 @@ jobs:
           mv artifacts/nunu-cli artifacts/nunu-cli-linux-${LINUX_ARCH}
           mv artifacts/nunu-cli.exe artifacts/nunu-cli-windows-${LINUX_ARCH}.exe
 
-          # Copy macOS binaries (already have architecture in filename from flake)
-          cp artifacts-macos/nunu-cli-* artifacts/
+          # Rename macOS binaries to include 'macos-' prefix
+          for file in artifacts-macos/nunu-cli-*; do
+            if [ -f "$file" ]; then
+              basename=$(basename "$file")
+              arch=${basename#nunu-cli-}
+              mv "$file" "artifacts/nunu-cli-macos-${arch}"
+              echo "Renamed $basename to nunu-cli-macos-${arch}"
+            fi
+          done
 
       - name: Create Release
         uses: softprops/action-gh-release@v1
