@@ -115,7 +115,7 @@ jobs:
         with:
           name: release-binaries-macos
           path: |
-            result/bin/nunu-cli
+            result/bin/nunu-cli-*
 
   create-github-release:
     if: github.ref == 'refs/heads/main' && needs.release.outputs.released == 'true'
@@ -142,10 +142,11 @@ jobs:
         run: |
           VERSION=${{ needs.release.outputs.version }}
           LINUX_ARCH=${{ needs.post-release-build-linux.outputs.arch }}
-          MACOS_ARCH=${{ needs.post-release-build-macos.outputs.arch }}
           mv artifacts/nunu-cli artifacts/nunu-cli-linux-${LINUX_ARCH}
           mv artifacts/nunu-cli.exe artifacts/nunu-cli-windows-${LINUX_ARCH}.exe
-          mv artifacts-macos/nunu-cli artifacts/nunu-cli-macos-${MACOS_ARCH}
+
+          # Copy macOS binaries (already have architecture in filename from flake)
+          cp artifacts-macos/nunu-cli-* artifacts/
 
       - name: Create Release
         uses: softprops/action-gh-release@v1

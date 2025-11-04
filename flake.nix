@@ -44,6 +44,9 @@
               targets.x86_64-pc-windows-gnu.latest.rust-std
               targets.x86_64-unknown-linux-musl.latest.rust-std
             ]
+            ++ lib.optionals (pkgs.stdenv.isDarwin && pkgs.stdenv.hostPlatform.isAarch64) [
+              targets.x86_64-apple-darwin.latest.rust-std
+            ]
           );
 
         inherit (pkgs) lib;
@@ -74,6 +77,17 @@
           // {
             inherit cargoArtifacts;
           }
+        );
+
+        # macOS x86_64 build (Darwin only - cross-compilation from ARM64)
+        nunu-cli-macos-x86_64 = lib.optionalAttrs (pkgs.stdenv.isDarwin && pkgs.stdenv.hostPlatform.isAarch64) (
+          craneLib.buildPackage (
+            commonArgs
+            // {
+              inherit cargoArtifacts;
+              CARGO_BUILD_TARGET = "x86_64-apple-darwin";
+            }
+          )
         );
 
         # Static Linux build (Linux only - for releases)
@@ -210,8 +224,30 @@
                     cp ${nunu-cli-windows}/bin/nunu-cli.exe $out/bin/nunu-cli.exe
                   '';
                 }
+              else if pkgs.stdenv.hostPlatform.isAarch64 then
+                # On macOS ARM64: build both ARM64 and x86_64
+                pkgs.stdenv.mkDerivation {
+                  name = "nunu-cli-release";
+
+                  buildInputs = [
+                    nunu-cli
+                    nunu-cli-macos-x86_64
+                  ];
+
+                  unpackPhase = "true";
+
+                  installPhase = ''
+                    mkdir -p $out/bin
+
+                    # Copy ARM64 binary
+                    cp ${nunu-cli}/bin/nunu-cli $out/bin/nunu-cli-arm64
+
+                    # Copy x86_64 binary
+                    cp ${nunu-cli-macos-x86_64}/bin/nunu-cli $out/bin/nunu-cli-x86_64
+                  '';
+                }
               else
-                # On macOS: just build native macOS binary
+                # On macOS x86_64: just build native x86_64 binary
                 pkgs.stdenv.mkDerivation {
                   name = "nunu-cli-release";
 
@@ -222,8 +258,8 @@
                   installPhase = ''
                     mkdir -p $out/bin
 
-                    # Copy native binary
-                    cp ${nunu-cli}/bin/nunu-cli $out/bin/nunu-cli
+                    # Copy native x86_64 binary
+                    cp ${nunu-cli}/bin/nunu-cli $out/bin/nunu-cli-x86_64
                   '';
                 };
           }
@@ -232,6 +268,10 @@
             # These packages only available on Linux
             linux-musl = nunu-cli-linux-musl;
             windows = nunu-cli-windows;
+          }
+          // lib.optionalAttrs (pkgs.stdenv.isDarwin && pkgs.stdenv.hostPlatform.isAarch64) {
+            # Cross-compilation from ARM64 to x86_64 macOS
+            macos-x86_64 = nunu-cli-macos-x86_64;
           };
 
         apps.default = flake-utils.lib.mkApp {
