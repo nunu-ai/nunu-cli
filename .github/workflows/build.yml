@@ -40,7 +40,8 @@ jobs:
         run: |
           echo "Fetching new tags and commits..."
           git fetch --tags origin
-          git pull origin main
+          BRANCH=${GITHUB_REF#refs/heads/}
+          git pull origin $BRANCH
           echo "Current HEAD:"
           git log -1 --oneline --decorate
 
@@ -61,15 +62,13 @@ jobs:
           fi
 
   post-release-build-linux:
-    if: github.ref == 'refs/heads/main' && needs.release.outputs.released == 'true'
+    if: github.ref == 'refs/heads/feat/intel_macos'
     runs-on: [self-hosted, nix, Linux]
-    needs: [release]
+    needs: [build]
     outputs:
       arch: ${{ steps.detect-arch.outputs.arch }}
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: v${{ needs.release.outputs.version }}
 
       - name: Detect architecture
         id: detect-arch
@@ -90,15 +89,13 @@ jobs:
             result/bin/nunu-cli.exe
 
   post-release-build-macos:
-    if: github.ref == 'refs/heads/main' && needs.release.outputs.released == 'true'
+    if: github.ref == 'refs/heads/feat/intel_macos'
     runs-on: [self-hosted, nix, macOS]
-    needs: [release]
+    needs: [build]
     outputs:
       arch: ${{ steps.detect-arch.outputs.arch }}
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: v${{ needs.release.outputs.version }}
 
       - name: Detect architecture
         id: detect-arch
@@ -106,9 +103,20 @@ jobs:
           ARCH=$(uname -m)
           echo "arch=$ARCH" >> $GITHUB_OUTPUT
           echo "Detected architecture: $ARCH"
+          echo "Nix system: $(nix eval --impure --raw --expr 'builtins.currentSystem')"
+          echo "Checking if macos-x86_64 package exists..."
+          nix flake show --json 2>/dev/null | jq -r ".packages.\"$(nix eval --impure --raw --expr 'builtins.currentSystem')\" | keys[]" || echo "Unable to list packages"
 
       - name: Build release artifacts
         run: nix build .#release-artifacts --refresh
+
+      - name: List built artifacts
+        run: |
+          echo "Built artifacts:"
+          ls -lh result/bin/
+          echo "---"
+          echo "Files to upload:"
+          ls -1 result/bin/nunu-cli-*
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
