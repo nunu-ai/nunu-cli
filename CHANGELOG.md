@@ -1,8 +1,22 @@
 # Changelog
 
-## [v0.1.16](https://github.com/nunu-ai/nunu-cli/compare/v0.1.15...c61f5846b70d288a4d66b2e471804d42d7b39bd5) (2025-11-03)
+## [v0.1.17](https://github.com/nunu-ai/nunu-cli/compare/v0.1.16...bd5fa129bc7880ff9863c888abfbd1765d613f06) (2025-11-04)
 
 ### Features
+
+* test intel macos cc
+([486ebc6](https://github.com/nunu-ai/nunu-cli/commit/486ebc6a112805351f41e473912191af3289e6cd))
+
+### Fixes
+
+* artifact names for upload
+([1f708ef](https://github.com/nunu-ai/nunu-cli/commit/1f708ef5f194de364380bdde750f54be334d384d))
+* test
+([81c6f2b](https://github.com/nunu-ai/nunu-cli/commit/81c6f2b4583d21c2f39e160df1ebef81e9b8522b))
+
+### [v0.1.16](https://github.com/nunu-ai/nunu-cli/compare/v0.1.15...v0.1.16) (2025-11-03)
+
+#### Features
 
 * automatically detect and attach arch to filenames
 ([c61f584](https://github.com/nunu-ai/nunu-cli/commit/c61f5846b70d288a4d66b2e471804d42d7b39bd5))
