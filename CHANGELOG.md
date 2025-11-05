@@ -1,13 +1,25 @@
 # Changelog
 
-## [v0.1.17](https://github.com/nunu-ai/nunu-cli/compare/v0.1.16...bd5fa129bc7880ff9863c888abfbd1765d613f06) (2025-11-04)
+## [v0.1.18](https://github.com/nunu-ai/nunu-cli/compare/v0.1.17...e2f839b2883daf6dba785af3bdd29c2a4bc459ee) (2025-11-05)
 
 ### Features
+
+* update README for intel_macos and
+([3093ba6](https://github.com/nunu-ai/nunu-cli/commit/3093ba6e635d09ec91abe93fe32881495fa4c723))
+
+### Fixes
+
+* obfuscate sensitive proxy urls, track upload progress atomically
+([fd18083](https://github.com/nunu-ai/nunu-cli/commit/fd18083e882ab18a79460b42ec7959f0facc9c28))
+
+### [v0.1.17](https://github.com/nunu-ai/nunu-cli/compare/v0.1.16...v0.1.17) (2025-11-04)
+
+#### Features
 
 * test intel macos cc
 ([486ebc6](https://github.com/nunu-ai/nunu-cli/commit/486ebc6a112805351f41e473912191af3289e6cd))
 
-### Fixes
+#### Fixes
 
 * artifact names for upload
 ([1f708ef](https://github.com/nunu-ai/nunu-cli/commit/1f708ef5f194de364380bdde750f54be334d384d))
