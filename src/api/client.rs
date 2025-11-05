@@ -207,11 +207,11 @@ impl Client {
     pub fn new(config: Config) -> Self {
         // Check for proxy configuration
         if let Ok(proxy) = std::env::var("HTTPS_PROXY").or_else(|_| std::env::var("https_proxy")) {
-            info!("Using proxy: {proxy}");
+            info!("Using proxy: {}", Self::redact_proxy_url(&proxy));
         } else if let Ok(proxy) =
             std::env::var("HTTP_PROXY").or_else(|_| std::env::var("http_proxy"))
         {
-            info!("Using proxy: {proxy}");
+            info!("Using proxy: {}", Self::redact_proxy_url(&proxy));
         } else {
             debug!("No proxy configured (direct connection)");
         }
@@ -219,6 +219,22 @@ impl Client {
         Self {
             http: HttpClient::new(), // reqwest automatically uses proxy
             config,
+        }
+    }
+
+    /// Redact sensitive information from proxy URLs
+    fn redact_proxy_url(url: &str) -> String {
+        if let Ok(mut parsed) = url::Url::parse(url) {
+            if parsed.username() != "" || parsed.password().is_some() {
+                let _ = parsed.set_username("***");
+                let _ = parsed.set_password(Some("***"));
+                parsed.to_string()
+            } else {
+                // No credentials - safe to show
+                url.to_string()
+            }
+        } else {
+            "<proxy configured>".to_string()
         }
     }
 
@@ -386,6 +402,8 @@ impl Client {
     {
         use futures::StreamExt;
         use std::io::Cursor;
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicU64, Ordering};
 
         info!("Uploading {} bytes to URL", data.len());
         debug!("Upload URL: {url}");
@@ -395,12 +413,16 @@ impl Client {
         let cursor = Cursor::new(data);
         let reader = tokio::io::BufReader::new(cursor);
         let stream = tokio_util::io::ReaderStream::new(reader);
-        let mut uploaded = 0u64;
+
+        // Use Arc<AtomicU64> so both closures can access the counter
+        let uploaded = Arc::new(AtomicU64::new(0));
+        let uploaded_clone = uploaded.clone();
 
         let stream_with_progress = stream.map(move |chunk| {
             if let Ok(ref bytes) = chunk {
-                uploaded += bytes.len() as u64;
-                progress_callback(uploaded);
+                let new_uploaded = uploaded_clone.fetch_add(bytes.len() as u64, Ordering::Relaxed)
+                    + bytes.len() as u64;
+                progress_callback(new_uploaded);
             }
             chunk
         });
@@ -416,6 +438,7 @@ impl Client {
             .send()
             .await
             .map_err(|e| {
+                let bytes_uploaded = uploaded.load(Ordering::Relaxed);
                 if e.is_connect() {
                     Error::UploadError(format!(
                         "Cannot connect to storage. Possible causes:\n\
@@ -426,7 +449,7 @@ impl Client {
                     ))
                 } else if e.is_request() {
                     Error::UploadError(format!(
-                        "Request failed after uploading {uploaded} bytes. This may indicate:\n\
+                        "Request failed after uploading {bytes_uploaded} bytes. This may indicate:\n\
                      - Network interruption during upload\n\
                      - Proxy interfering with the request\n\
                      - SSL/TLS issue\n\
