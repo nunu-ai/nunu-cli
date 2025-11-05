@@ -205,8 +205,19 @@ pub struct CompleteRequest {
 impl Client {
     #[must_use]
     pub fn new(config: Config) -> Self {
+        // Check for proxy configuration
+        if let Ok(proxy) = std::env::var("HTTPS_PROXY").or_else(|_| std::env::var("https_proxy")) {
+            info!("Using proxy: {proxy}");
+        } else if let Ok(proxy) =
+            std::env::var("HTTP_PROXY").or_else(|_| std::env::var("http_proxy"))
+        {
+            info!("Using proxy: {proxy}");
+        } else {
+            debug!("No proxy configured (direct connection)");
+        }
+
         Self {
-            http: HttpClient::new(),
+            http: HttpClient::new(), // reqwest automatically uses proxy
             config,
         }
     }
@@ -290,18 +301,68 @@ impl Client {
     /// Returns an error if the HTTP request fails or if the server returns a non-success status code.
     pub async fn upload_to_url(&self, url: &str, data: Vec<u8>) -> Result<()> {
         info!("Uploading {} bytes to URL", data.len());
+        debug!("Upload URL: {url}");
 
         let response = self
             .http
             .put(url)
             .header("Content-Type", "application/octet-stream")
+            .header("Content-Length", data.len().to_string())
             .body(data)
             .send()
-            .await?;
+            .await
+            .map_err(|e| {
+                if e.is_connect() {
+                    Error::UploadError(format!(
+                        "Cannot connect to storage. Possible causes:\n\
+                     - Firewall blocking *.r2.cloudflarestorage.com\n\
+                     - Network proxy required (set HTTPS_PROXY environment variable)\n\
+                     - DNS resolution failure\n\
+                     Error details: {e}"
+                    ))
+                } else if e.is_request() {
+                    Error::UploadError(format!(
+                        "Request failed. This may indicate:\n\
+                     - Network interruption during upload\n\
+                     - Proxy interfering with the request\n\
+                     - SSL/TLS issue\n\
+                     Error details: {e}"
+                    ))
+                } else {
+                    Error::UploadError(format!("HTTP error: {e}"))
+                }
+            })?;
+
+        debug!("Upload response status: {}", response.status());
+        debug!("Upload response headers: {:?}", response.headers());
 
         if !response.status().is_success() {
             let status = response.status();
             let body = response.text().await.unwrap_or_default();
+
+            // Parse XML error if present
+            if body.contains("<Code>") && body.contains("</Code>") {
+                let error_code = body
+                    .split("<Code>")
+                    .nth(1)
+                    .and_then(|s| s.split("</Code>").next())
+                    .unwrap_or("Unknown");
+
+                let error_message = body
+                    .split("<Message>")
+                    .nth(1)
+                    .and_then(|s| s.split("</Message>").next())
+                    .unwrap_or(&body);
+
+                return Err(Error::UploadError(format!(
+                    "Storage error: {error_code} - {error_message}\n\
+                 \n\
+                 To diagnose, test the upload URL directly:\n\
+                 echo 'test' > test.txt\n\
+                 curl -X PUT -H 'Content-Type: application/octet-stream' --data-binary @test.txt -v '<url>'"
+                )));
+            }
+
             return Err(Error::UploadError(format!("Status {status}: {body}")));
         }
 
@@ -327,14 +388,12 @@ impl Client {
         use std::io::Cursor;
 
         info!("Uploading {} bytes to URL", data.len());
+        debug!("Upload URL: {url}");
 
         let total_size = data.len() as u64;
 
-        // Create a stream from the data with progress tracking
         let cursor = Cursor::new(data);
         let reader = tokio::io::BufReader::new(cursor);
-
-        // Convert to async stream with progress
         let stream = tokio_util::io::ReaderStream::new(reader);
         let mut uploaded = 0u64;
 
@@ -355,11 +414,58 @@ impl Client {
             .header("Content-Length", total_size.to_string())
             .body(body)
             .send()
-            .await?;
+            .await
+            .map_err(|e| {
+                if e.is_connect() {
+                    Error::UploadError(format!(
+                        "Cannot connect to storage. Possible causes:\n\
+                     - Firewall blocking *.r2.cloudflarestorage.com\n\
+                     - Network proxy required (set HTTPS_PROXY environment variable)\n\
+                     - DNS resolution failure\n\
+                     Error details: {e}"
+                    ))
+                } else if e.is_request() {
+                    Error::UploadError(format!(
+                        "Request failed after uploading {uploaded} bytes. This may indicate:\n\
+                     - Network interruption during upload\n\
+                     - Proxy interfering with the request\n\
+                     - SSL/TLS issue\n\
+                     Error details: {e}"
+                    ))
+                } else {
+                    Error::UploadError(format!("HTTP error: {e}"))
+                }
+            })?;
+
+        debug!("Upload response status: {}", response.status());
+        debug!("Upload response headers: {:?}", response.headers());
 
         if !response.status().is_success() {
             let status = response.status();
             let body = response.text().await.unwrap_or_default();
+
+            if body.contains("<Code>") && body.contains("</Code>") {
+                let error_code = body
+                    .split("<Code>")
+                    .nth(1)
+                    .and_then(|s| s.split("</Code>").next())
+                    .unwrap_or("Unknown");
+
+                let error_message = body
+                    .split("<Message>")
+                    .nth(1)
+                    .and_then(|s| s.split("</Message>").next())
+                    .unwrap_or(&body);
+
+                return Err(Error::UploadError(format!(
+                    "Storage error: {error_code} - {error_message}\n\
+                 \n\
+                 To diagnose, test the upload URL directly:\n\
+                 echo 'test' > test.txt\n\
+                 curl -X PUT -H 'Content-Type: application/octet-stream' --data-binary @test.txt -v '<presigned-url>'"
+                )));
+            }
+
             return Err(Error::UploadError(format!("Status {status}: {body}")));
         }
 
