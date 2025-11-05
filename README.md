@@ -25,20 +25,30 @@ sudo mv nunu-cli-linux-x86_64 /usr/local/bin/nunu-cli
 
 ### macOS
 
-**Latest version (recommended):**
+**ARM64 (Apple Silicon) - Latest version (recommended):**
 ```bash
 curl -L -O https://github.com/nunu-ai/nunu-cli/releases/latest/download/nunu-cli-macos-arm64
 chmod +x nunu-cli-macos-arm64
 sudo mv nunu-cli-macos-arm64 /usr/local/bin/nunu-cli
 ```
 
+**x86_64 (Intel) - Latest version:**
+```bash
+curl -L -O https://github.com/nunu-ai/nunu-cli/releases/latest/download/nunu-cli-macos-x86_64
+chmod +x nunu-cli-macos-x86_64
+sudo mv nunu-cli-macos-x86_64 /usr/local/bin/nunu-cli
+```
+
 **Specific version:**
 ```bash
 VERSION=0.1.15  # Replace with desired version
-curl -L -O https://github.com/nunu-ai/nunu-cli/releases/download/v${VERSION}/nunu-cli-macos-arm64
-chmod +x nunu-cli-macos-arm64
-sudo mv nunu-cli-macos-arm64 /usr/local/bin/nunu-cli
+ARCH=arm64      # or x86_64 for Intel Macs
+curl -L -O https://github.com/nunu-ai/nunu-cli/releases/download/v${VERSION}/nunu-cli-macos-${ARCH}
+chmod +x nunu-cli-macos-${ARCH}
+sudo mv nunu-cli-macos-${ARCH} /usr/local/bin/nunu-cli
 ```
+
+> **Note:** Apple Silicon Macs can run either binary. The ARM64 version is native and recommended for best performance.
 
 ### Windows
 
