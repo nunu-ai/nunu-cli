@@ -1,13 +1,20 @@
 # Changelog
 
-## [v0.1.18](https://github.com/nunu-ai/nunu-cli/compare/v0.1.17...e2f839b2883daf6dba785af3bdd29c2a4bc459ee) (2025-11-05)
+## [v0.1.19](https://github.com/nunu-ai/nunu-cli/compare/v0.1.18...363f55341d9308b7c0d19f6c280e9241454253e3) (2025-11-24)
 
 ### Features
+
+* find commit SHA in github PR workflows
+([7ce0eed](https://github.com/nunu-ai/nunu-cli/commit/7ce0eed4d63c813e3c1aabcdef9f333805d54719))
+
+### [v0.1.18](https://github.com/nunu-ai/nunu-cli/compare/v0.1.17...v0.1.18) (2025-11-05)
+
+#### Features
 
 * update README for intel_macos and
 ([3093ba6](https://github.com/nunu-ai/nunu-cli/commit/3093ba6e635d09ec91abe93fe32881495fa4c723))
 
-### Fixes
+#### Fixes
 
 * obfuscate sensitive proxy urls, track upload progress atomically
 ([fd18083](https://github.com/nunu-ai/nunu-cli/commit/fd18083e882ab18a79460b42ec7959f0facc9c28))
