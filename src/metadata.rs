@@ -118,7 +118,7 @@ fn collect_github_actions_git_metadata() -> Option<VcsMetadata> {
         return None;
     }
 
-    let github_sha = std::env::var("GITHUB_SHA").ok()?;
+    let github_sha = get_github_head_sha()?;
     let github_ref = std::env::var("GITHUB_REF").ok()?;
 
     let branch = if github_ref.starts_with("refs/heads/") {
@@ -176,6 +176,36 @@ fn collect_github_actions_git_metadata() -> Option<VcsMetadata> {
         tag,
         pr,
     })
+}
+
+/// Get the actual commit SHA from GitHub Actions, not the merge commit
+fn get_github_head_sha() -> Option<String> {
+    // Try to read from GITHUB_EVENT_PATH for the actual commit SHA
+    if let Ok(event_path) = std::env::var("GITHUB_EVENT_PATH")
+        && let Ok(content) = std::fs::read_to_string(event_path)
+        && let Ok(json) = serde_json::from_str::<serde_json::Value>(&content)
+    {
+        // For pull_request events, get the HEAD SHA from the PR
+        if let Some(head_sha) = json["pull_request"]["head"]["sha"].as_str() {
+            return Some(head_sha.to_string());
+        }
+
+        // For push events - try 'after' first (most reliable)
+        if let Some(after) = json["after"].as_str() {
+            // Not a deletion (all zeros)
+            if after != "0000000000000000000000000000000000000000" {
+                return Some(after.to_string());
+            }
+        }
+
+        // Fallback to head_commit.id for push events
+        if let Some(head_commit_id) = json["head_commit"]["id"].as_str() {
+            return Some(head_commit_id.to_string());
+        }
+    }
+
+    // Final fallback to GITHUB_SHA
+    std::env::var("GITHUB_SHA").ok()
 }
 
 /// Collect GitLab CI metadata from environment variables
