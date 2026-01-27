@@ -1,3 +1,4 @@
+use chrono::{DateTime, FixedOffset, Utc};
 use serde::{Deserialize, Serialize};
 use std::process::Command;
 
@@ -244,7 +245,9 @@ fn collect_gitlab_ci_git_metadata() -> Option<VcsMetadata> {
                 .unwrap_or_else(|_| commit_sha.chars().take(7).collect()),
             message: std::env::var("CI_COMMIT_MESSAGE").ok(),
             author: std::env::var("CI_COMMIT_AUTHOR").ok(),
-            timestamp: std::env::var("CI_COMMIT_TIMESTAMP").ok(),
+            timestamp: std::env::var("CI_COMMIT_TIMESTAMP")
+                .ok()
+                .and_then(|ts| normalize_timestamp(&ts)),
         },
         branch,
         tag,
@@ -301,8 +304,7 @@ fn is_git_repo() -> bool {
     Command::new("git")
         .args(["rev-parse", "--git-dir"])
         .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
+        .is_ok_and(|o| o.status.success())
 }
 
 fn detect_git_provider(url: &str) -> Option<String> {
@@ -316,5 +318,80 @@ fn detect_git_provider(url: &str) -> Option<String> {
         Some("azure-devops".to_string())
     } else {
         None
+    }
+}
+
+/// Normalize an ISO 8601 timestamp to Zod-compatible datetime format
+///
+/// Zod's `z.string().datetime()` expects ISO 8601 with `Z` suffix (UTC).
+/// This function parses various ISO 8601 formats and converts to UTC with `Z` suffix.
+/// Returns None if the timestamp cannot be parsed.
+fn normalize_timestamp(timestamp: &str) -> Option<String> {
+    // Try parsing as RFC 3339 / ISO 8601 with timezone
+    if let Ok(dt) = DateTime::parse_from_rfc3339(timestamp) {
+        return Some(
+            dt.with_timezone(&Utc)
+                .format("%Y-%m-%dT%H:%M:%SZ")
+                .to_string(),
+        );
+    }
+
+    // Try parsing with chrono's flexible ISO 8601 parser
+    if let Ok(dt) = DateTime::<FixedOffset>::parse_from_str(timestamp, "%Y-%m-%dT%H:%M:%S%:z") {
+        return Some(
+            dt.with_timezone(&Utc)
+                .format("%Y-%m-%dT%H:%M:%SZ")
+                .to_string(),
+        );
+    }
+
+    // Try without colon in timezone offset (e.g., +0000)
+    if let Ok(dt) = DateTime::<FixedOffset>::parse_from_str(timestamp, "%Y-%m-%dT%H:%M:%S%z") {
+        return Some(
+            dt.with_timezone(&Utc)
+                .format("%Y-%m-%dT%H:%M:%SZ")
+                .to_string(),
+        );
+    }
+
+    None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_normalize_timestamp_gitlab_format() {
+        // GitLab CI_COMMIT_TIMESTAMP format - should convert to UTC with Z suffix
+        let gitlab_ts = "2024-01-15T10:30:00+00:00";
+        let result = normalize_timestamp(gitlab_ts);
+        assert!(result.is_some());
+        assert_eq!(result.unwrap(), "2024-01-15T10:30:00Z");
+    }
+
+    #[test]
+    fn test_normalize_timestamp_with_offset() {
+        // Timestamp with +05:30 offset should be converted to UTC
+        let ts = "2024-01-15T10:30:00+05:30";
+        let result = normalize_timestamp(ts);
+        assert!(result.is_some());
+        assert_eq!(result.unwrap(), "2024-01-15T05:00:00Z");
+    }
+
+    #[test]
+    fn test_normalize_timestamp_zulu() {
+        // Already in Z format - should remain the same
+        let ts = "2024-01-15T10:30:00Z";
+        let result = normalize_timestamp(ts);
+        assert!(result.is_some());
+        assert_eq!(result.unwrap(), "2024-01-15T10:30:00Z");
+    }
+
+    #[test]
+    fn test_normalize_timestamp_invalid() {
+        let invalid = "not-a-timestamp";
+        let result = normalize_timestamp(invalid);
+        assert!(result.is_none());
     }
 }
