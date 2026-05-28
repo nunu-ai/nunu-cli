@@ -87,7 +87,7 @@ pub async fn upload_single_part(
         })
         .await?;
 
-    pb.finish_with_message("Upload complete");
+    pb.set_message("Finalizing...");
 
     client.complete_upload(&upload_response.build_id).await?;
 

@@ -155,7 +155,7 @@ pub async fn upload_multipart(
         uploaded_parts.extend(batch_results);
     }
 
-    pb.finish_with_message("All parts uploaded");
+    pb.set_message("Finalizing...");
 
     // Sort parts by part number (required by S3)
     uploaded_parts.sort_by_key(|p| p.part_number);

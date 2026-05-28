@@ -500,6 +500,7 @@ async fn main() -> Result<()> {
                             } else {
                                 pb.finish_with_message("✗ Failed");
                             }
+                            multi_progress.remove(&pb);
 
                             // Remove from active uploads on completion (success or failure)
                             {
