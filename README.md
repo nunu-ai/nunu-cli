@@ -125,7 +125,7 @@ export NUNU_API_TOKEN=your_token
 Create `nunu.json` in your project:
 ```json
 {
-  "api_token": "your_token",
+  "api_token": "your_token"
 }
 ```
 
