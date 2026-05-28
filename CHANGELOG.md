@@ -1,8 +1,22 @@
 # Changelog
 
-## [v0.1.19](https://github.com/nunu-ai/nunu-cli/compare/v0.1.18...363f55341d9308b7c0d19f6c280e9241454253e3) (2025-11-24)
+## [v0.1.20](https://github.com/nunu-ai/nunu-cli/compare/v0.1.19...33ed773b2f4e20289f5ae705278ff9c27785fc6a) (2026-05-28)
 
 ### Features
+
+* remove project_id and use public v1 api
+([96b24fc](https://github.com/nunu-ai/nunu-cli/commit/96b24fc149c20d6a7aa6b2daa9a87c31b60a5f0b))
+
+### Fixes
+
+* trailing comma
+([92342eb](https://github.com/nunu-ai/nunu-cli/commit/92342ebf494622733dce0b3342f627a7fc4d7021))
+* duplicate progress bar
+([6aeb4c8](https://github.com/nunu-ai/nunu-cli/commit/6aeb4c8a1e248b37055e3c1f3151cc7cec945499))
+
+### [v0.1.19](https://github.com/nunu-ai/nunu-cli/compare/v0.1.18...v0.1.19) (2025-11-24)
+
+#### Features
 
 * find commit SHA in github PR workflows
 ([7ce0eed](https://github.com/nunu-ai/nunu-cli/commit/7ce0eed4d63c813e3c1aabcdef9f333805d54719))
