@@ -58,10 +58,6 @@ enum Commands {
         #[arg(short, long, env = "NUNU_API_TOKEN")]
         token: Option<String>,
 
-        /// Project ID
-        #[arg(short, long, env = "NUNU_PROJECT_ID")]
-        project_id: Option<String>,
-
         /// API base URL
         #[arg(long, env = "NUNU_API_URL")]
         api_url: Option<String>,
@@ -253,7 +249,6 @@ async fn main() -> Result<()> {
         Commands::Upload {
             files,
             token,
-            project_id,
             api_url,
             name,
             platform,
@@ -311,17 +306,12 @@ async fn main() -> Result<()> {
                 .or(file_config.api_token)
                 .ok_or_else(|| anyhow::anyhow!("API token not provided (use --token, NUNU_API_TOKEN env var, or config file)"))?;
 
-            let final_project_id = project_id
-                .or_else(|| std::env::var("NUNU_PROJECT_ID").ok())
-                .or(file_config.project_id)
-                .ok_or_else(|| anyhow::anyhow!("Project ID not provided (use --project-id, NUNU_PROJECT_ID env var, or config file)"))?;
-
             let final_api_url = api_url
                 .or_else(|| std::env::var("NUNU_API_URL").ok())
                 .or(file_config.api_url)
                 .unwrap_or_else(|| "https://nunu.ai/api".to_string());
 
-            let config = Config::new(final_token, final_project_id, final_api_url)?;
+            let config = Config::new(final_token, final_api_url)?;
 
             let file_count = files.len();
 

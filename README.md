@@ -60,7 +60,6 @@ sudo mv nunu-cli-macos-${ARCH} /usr/local/bin/nunu-cli
 ```bash
 # Set credentials (get from Project Admin → API Keys)
 export NUNU_API_TOKEN=your_token
-export NUNU_PROJECT_ID=your_project_id
 
 # Upload a build
 nunu-cli upload build/app.apk --name "Production v1.2.3"
@@ -119,7 +118,6 @@ For ambiguous files (`.zip`, `.tar`), specify `--platform` explicitly.
 ### Environment Variables (Recommended)
 ```bash
 export NUNU_API_TOKEN=your_token
-export NUNU_PROJECT_ID=your_project_id
 ```
 
 ### Config File
@@ -128,7 +126,6 @@ Create `nunu.json` in your project:
 ```json
 {
   "api_token": "your_token",
-  "project_id": "your_project_id"
 }
 ```
 
@@ -170,7 +167,6 @@ No additional configuration required.
 - name: Upload build
   env:
     NUNU_API_TOKEN: ${{ secrets.NUNU_API_TOKEN }}
-    NUNU_PROJECT_ID: ${{ secrets.NUNU_PROJECT_ID }}
   run: nunu-cli upload "build/app-*.apk" --name "Build ${{ github.run_number }}"
 ```
 
