@@ -11,9 +11,6 @@ pub struct FileConfig {
     pub api_token: Option<String>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub project_id: Option<String>,
-
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub api_url: Option<String>,
 }
 
@@ -99,7 +96,6 @@ impl FileConfig {
     pub fn merge_with(&self, other: &FileConfig) -> Self {
         FileConfig {
             api_token: self.api_token.clone().or_else(|| other.api_token.clone()),
-            project_id: self.project_id.clone().or_else(|| other.project_id.clone()),
             api_url: self.api_url.clone().or_else(|| other.api_url.clone()),
         }
     }
@@ -113,20 +109,17 @@ mod tests {
     fn test_merge_with() {
         let config1 = FileConfig {
             api_token: Some("token1".to_string()),
-            project_id: None,
             api_url: Some("url1".to_string()),
         };
 
         let config2 = FileConfig {
             api_token: Some("token2".to_string()),
-            project_id: Some("project2".to_string()),
             api_url: Some("url2".to_string()),
         };
 
         let merged = config1.merge_with(&config2);
 
         assert_eq!(merged.api_token, Some("token1".to_string()));
-        assert_eq!(merged.project_id, Some("project2".to_string()));
         assert_eq!(merged.api_url, Some("url1".to_string()));
     }
 }
