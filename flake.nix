@@ -18,6 +18,11 @@
     };
   };
 
+  nixConfig = {
+    extra-substituters = [ "https://nix.nunu.ai" ];
+    extra-trusted-public-keys = [ "nix.nunu.ai:Ny6XbPOvwxCHlH1xK+6i8qwhBxFQj6O053aH4gEVn7U=" ];
+  };
+
   outputs =
     {
       self,
