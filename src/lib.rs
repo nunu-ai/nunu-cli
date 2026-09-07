@@ -3,8 +3,9 @@
 pub mod ci_metadata;
 pub mod config;
 pub mod error;
-pub mod file_config;
 pub mod metadata;
+
+pub mod auth;
 
 pub mod api;
 pub mod upload;

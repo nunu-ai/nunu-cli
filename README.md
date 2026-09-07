@@ -58,11 +58,11 @@ sudo mv nunu-cli-macos-${ARCH} /usr/local/bin/nunu-cli
 
 ## Quick Start
 ```bash
-# Set credentials (get from Project Admin → API Keys)
-export NUNU_API_TOKEN=your_token
+# Interactive browser login (recommended for local development)
+nunu-cli auth login
 
 # Upload a build
-nunu-cli upload build/app.apk --name "Production v1.2.3"
+nunu-cli upload build/app.apk --project-id your-project --name "Production v1.2.3"
 ```
 
 Platform is automatically detected from file extension.
@@ -113,30 +113,51 @@ Automatically detected: `.apk` (android), `.ipa` (ios-native), `.exe/.msi` (wind
 
 For ambiguous files (`.zip`, `.tar`), specify `--platform` explicitly.
 
-## Configuration
+## Authentication
 
-### Environment Variables (Recommended)
+For an interactive developer session, log in with OAuth:
+
 ```bash
-export NUNU_API_TOKEN=your_token
+nunu-cli auth login
+nunu-cli auth status
+nunu-cli auth logout
 ```
 
-### Config File
+To save an API key instead, use the hidden prompt:
 
-Create `nunu.json` in your project:
-```json
-{
-  "api_token": "your_token"
-}
+```bash
+nunu-cli auth login --api-key
 ```
 
-The CLI automatically searches for config files in the following order:
-1. `--config` flag (if specified)
-2. `./nunu.json` (project root)
-3. `./.nunu/config.json` (hidden directory in project root)
-4. `~/.config/nunu/config.json` (user-level config on Linux/macOS)
-5. `%APPDATA%/nunu/config.json` (user-level config on Windows)
+For CI, provide an API key through the environment instead of saving a login:
 
+```bash
+export NUNU_API_KEY=your_api_key
+export NUNU_PROJECT_ID=your_project
+nunu-cli upload build/app.apk --name "CI build"
+```
 
+`NUNU_API_TOKEN` remains supported as a legacy alias for `NUNU_API_KEY`.
+
+### Self-hosted and local development
+
+The CLI uses `https://nunu.ai` by default and derives the API and MCP endpoints
+as `/api` and `/mcp`. Override the single base URL when developing locally:
+
+```bash
+export NUNU_BASE_URL=http://localhost:3000
+nunu-cli auth login
+```
+
+The CLI also loads `.env`, so a local file can contain:
+
+```dotenv
+NUNU_BASE_URL=http://localhost:3000
+```
+
+Plain HTTP is accepted only for localhost. Credentials are stored in the
+operating-system credential store, with a user-permission-only file fallback
+for headless systems. Project JSON files are not used for credentials.
 
 ## Automatic Metadata Collection
 
@@ -166,7 +187,8 @@ No additional configuration required.
 ```yaml
 - name: Upload build
   env:
-    NUNU_API_TOKEN: ${{ secrets.NUNU_API_TOKEN }}
+    NUNU_API_KEY: ${{ secrets.NUNU_API_KEY }}
+    NUNU_PROJECT_ID: ${{ vars.NUNU_PROJECT_ID }}
   run: nunu-cli upload "build/app-*.apk" --name "Build ${{ github.run_number }}"
 ```
 

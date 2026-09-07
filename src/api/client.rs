@@ -277,11 +277,9 @@ impl Client {
         debug!("Upload request: {request:?}");
 
         let response = self
-            .http
-            .post(&url)
-            .header("x-api-key", self.config.token.clone())
-            .json(&request)
-            .send()
+            .config
+            .credential
+            .send_authenticated(self.http.post(&url).json(&request))
             .await?;
 
         info!("Received response with status: {response:?}");
@@ -510,11 +508,9 @@ impl Client {
         };
 
         let response = self
-            .http
-            .post(&url)
-            .header("x-api-key", self.config.token.clone())
-            .json(&request)
-            .send()
+            .config
+            .credential
+            .send_authenticated(self.http.post(&url).json(&request))
             .await?;
 
         if !response.status().is_success() {
@@ -568,11 +564,9 @@ impl Client {
         debug!("Upload request: {request:?}");
 
         let response = self
-            .http
-            .post(&url)
-            .header("x-api-key", self.config.token.clone())
-            .json(&request)
-            .send()
+            .config
+            .credential
+            .send_authenticated(self.http.post(&url).json(&request))
             .await?;
 
         if !response.status().is_success() {
@@ -695,11 +689,9 @@ impl Client {
         };
 
         let response = self
-            .http
-            .post(&url)
-            .header("x-api-key", self.config.token.clone())
-            .json(&request)
-            .send()
+            .config
+            .credential
+            .send_authenticated(self.http.post(&url).json(&request))
             .await?;
 
         if !response.status().is_success() {
@@ -739,11 +731,9 @@ impl Client {
         }
 
         let response = self
-            .http
-            .delete(&url)
-            .header("x-api-key", self.config.token.clone())
-            .query(&query_params)
-            .send()
+            .config
+            .credential
+            .send_authenticated(self.http.delete(&url).query(&query_params))
             .await?;
 
         if !response.status().is_success() {

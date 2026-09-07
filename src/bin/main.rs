@@ -7,14 +7,17 @@ use log::{debug, error, info, warn};
 use nunu_cli::{
     BuildPlatform, Client, Config, DeletionPolicy, UploadOptions,
     api::client::{BuildDetails, UploadInfo},
+    auth::{
+        CredentialProvider, CredentialStorage, DEFAULT_BASE_URL, OAuthLoginOptions,
+        StoredCredential, endpoint_url, login_with_oauth, save_api_key, validate_mcp_credential,
+    },
     ci_metadata::collect_ci_metadata,
-    file_config::FileConfig,
     metadata::collect_git_metadata,
     upload_file,
 };
 use std::collections::HashMap;
 use std::io::Write;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
@@ -37,9 +40,9 @@ struct Cli {
     #[arg(short, long, global = true, action = clap::ArgAction::Count)]
     verbose: u8,
 
-    /// Path to config file (JSON format)
-    #[arg(short, long, global = true)]
-    config: Option<PathBuf>,
+    /// Nunu deployment base URL
+    #[arg(long, global = true, env = "NUNU_BASE_URL", default_value = DEFAULT_BASE_URL)]
+    base_url: String,
 
     #[command(subcommand)]
     command: Commands,
@@ -58,9 +61,13 @@ enum Commands {
         #[arg(short, long, env = "NUNU_API_TOKEN")]
         token: Option<String>,
 
-        /// API base URL
-        #[arg(long, env = "NUNU_API_URL")]
-        api_url: Option<String>,
+        /// API key for authentication (preferred over the legacy --token option)
+        #[arg(long, env = "NUNU_API_KEY", conflicts_with = "token")]
+        api_key: Option<String>,
+
+        /// Project ID (required for OAuth and organization API keys)
+        #[arg(long, env = "NUNU_PROJECT_ID")]
+        project_id: Option<String>,
 
         /// Build name (will be used as template for multiple files)
         #[arg(short, long)]
@@ -98,6 +105,32 @@ enum Commands {
         #[arg(long, value_delimiter = ',')]
         tags: Option<Vec<String>>,
     },
+
+    /// Manage API-key and OAuth authentication
+    Auth {
+        #[command(subcommand)]
+        command: AuthCommands,
+    },
+}
+
+#[derive(Subcommand)]
+enum AuthCommands {
+    /// Authenticate through the browser or save an API key
+    Login {
+        /// Prompt for and save an API key instead of using browser OAuth
+        #[arg(long)]
+        api_key: bool,
+
+        /// Print the OAuth URL without trying to open a browser
+        #[arg(long)]
+        no_browser: bool,
+    },
+
+    /// Show the active locally saved authentication method
+    Status,
+
+    /// Remove locally saved credentials
+    Logout,
 }
 
 /// Infer platform from file extension
@@ -123,12 +156,10 @@ fn infer_platform(file_path: &str) -> Result<BuildPlatform> {
             "Cannot infer platform for .app files. Please specify --platform explicitly (macos or ios-simulator)"
         )),
         "zip" | "tar" | "gz" | "7z" | "tgz" | "bz2" => Err(anyhow::anyhow!(
-            "Cannot infer platform for archive files (.{}). Please specify --platform explicitly",
-            extension
+            "Cannot infer platform for archive files (.{extension}). Please specify --platform explicitly"
         )),
         _ => Err(anyhow::anyhow!(
-            "Cannot infer platform from file extension '.{}'. Please specify --platform explicitly",
-            extension
+            "Cannot infer platform from file extension '.{extension}'. Please specify --platform explicitly"
         )),
     }
 }
@@ -249,7 +280,8 @@ async fn main() -> Result<()> {
         Commands::Upload {
             files,
             token,
-            api_url,
+            api_key,
+            project_id,
             name,
             platform,
             description,
@@ -294,24 +326,26 @@ async fn main() -> Result<()> {
                 }
             }
 
-            // Load config file with priority:
-            // 1. CLI args (highest)
-            // 2. Environment variables
-            // 3. Config file (--config or default locations)
-            let file_config = FileConfig::load_with_fallback(cli.config.as_ref())?;
+            // Clap resolves NUNU_API_KEY/NUNU_API_TOKEN and NUNU_PROJECT_ID.
+            let explicit_api_key = api_key.or(token);
+            let final_api_url = endpoint_url(&cli.base_url, "api")?;
+            let final_project_id = project_id;
 
-            // Resolve final values with priority
-            let final_token = token
-                .or_else(|| std::env::var("NUNU_API_TOKEN").ok())
-                .or(file_config.api_token)
-                .ok_or_else(|| anyhow::anyhow!("API token not provided (use --token, NUNU_API_TOKEN env var, or config file)"))?;
+            let credential = if let Some(api_key) = explicit_api_key {
+                CredentialProvider::api_key(api_key)?
+            } else {
+                CredentialProvider::load(CredentialStorage::discover()?)?
+            };
 
-            let final_api_url = api_url
-                .or_else(|| std::env::var("NUNU_API_URL").ok())
-                .or(file_config.api_url)
-                .unwrap_or_else(|| "https://nunu.ai/api".to_string());
+            if matches!(credential.snapshot().await, StoredCredential::OAuth(_))
+                && final_project_id.is_none()
+            {
+                return Err(anyhow::anyhow!(
+                    "OAuth uploads require a project ID (use --project-id or NUNU_PROJECT_ID)"
+                ));
+            }
 
-            let config = Config::new(final_token, final_api_url)?;
+            let config = Config::with_credential(credential, &final_api_url, final_project_id)?;
 
             let file_count = files.len();
 
@@ -662,6 +696,88 @@ async fn main() -> Result<()> {
                 .first()
                 .map(|(_, id)| id.clone())
                 .unwrap_or_default())
+        }
+        Commands::Auth { command } => {
+            let storage = CredentialStorage::discover()?;
+            match command {
+                AuthCommands::Login {
+                    api_key,
+                    no_browser,
+                } => {
+                    let mcp_url = endpoint_url(&cli.base_url, "mcp")?;
+
+                    let credential = if api_key {
+                        print!("Enter your Nunu API key: ");
+                        std::io::stdout().flush()?;
+                        let entered_api_key = rpassword::read_password()?;
+                        if entered_api_key.trim().is_empty() {
+                            return Err(anyhow::anyhow!("API key cannot be empty"));
+                        }
+                        StoredCredential::ApiKey {
+                            api_key: entered_api_key,
+                        }
+                    } else {
+                        login_with_oauth(&OAuthLoginOptions {
+                            mcp_url: mcp_url.clone(),
+                            open_browser: !no_browser,
+                        })
+                        .await?
+                    };
+
+                    print!("Verifying credentials... ");
+                    std::io::stdout().flush()?;
+                    validate_mcp_credential(&mcp_url, credential.clone()).await?;
+                    println!("done");
+
+                    let used_file_fallback = match credential {
+                        StoredCredential::ApiKey { api_key } => save_api_key(&storage, api_key)?,
+                        oauth @ StoredCredential::OAuth(_) => storage.save(&oauth)?,
+                    };
+
+                    println!("You're authenticated and ready to use Nunu.");
+                    if used_file_fallback {
+                        eprintln!(
+                            "Warning: the operating-system credential store was unavailable; credentials were saved to {} with user-only permissions.",
+                            storage.directory().display()
+                        );
+                    }
+                    Ok(String::new())
+                }
+                AuthCommands::Status => {
+                    let Some(credential) = storage.load()? else {
+                        println!("Not authenticated. Run 'nunu-cli auth login'.");
+                        return Ok(());
+                    };
+
+                    let provider =
+                        CredentialProvider::from_credential(credential, Some(storage.clone()))?;
+                    let _ = provider.header().await?;
+                    match provider.snapshot().await {
+                        StoredCredential::ApiKey { .. } => {
+                            println!("Authenticated with an API key.");
+                        }
+                        StoredCredential::OAuth(credential) => {
+                            let now = std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .unwrap_or_default()
+                                .as_secs();
+                            let remaining = credential.expires_at.saturating_sub(now);
+                            println!("Authenticated with OAuth.");
+                            println!("Server: {}", credential.mcp_url);
+                            println!(
+                                "Access token expires in approximately {} minutes.",
+                                remaining / 60
+                            );
+                        }
+                    }
+                    Ok(String::new())
+                }
+                AuthCommands::Logout => {
+                    storage.delete()?;
+                    println!("Logged out. Local Nunu credentials were removed.");
+                    Ok(String::new())
+                }
+            }
         }
     };
 
