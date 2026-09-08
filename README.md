@@ -23,14 +23,15 @@ Windows x64.
 ## Log in
 
 ```bash
-nunu-cli auth login
+npx --yes @nunu-ai/nunu-cli auth login
 ```
 
-Use `nunu-cli auth status` to check the current login and `nunu-cli auth logout`
-to remove it. To save an API key instead of using browser login, run:
+Use `npx --yes @nunu-ai/nunu-cli auth status` to check the current login and
+`npx --yes @nunu-ai/nunu-cli auth logout` to remove it. To save an API key
+instead of using browser login, run:
 
 ```bash
-nunu-cli auth login --api-key
+npx --yes @nunu-ai/nunu-cli auth login --api-key
 ```
 
 ## Upload a build

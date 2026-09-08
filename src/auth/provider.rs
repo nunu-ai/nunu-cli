@@ -1,5 +1,6 @@
-use crate::auth::oauth::{oauth_http_client, refresh_oauth_credential, unix_timestamp};
+use crate::auth::oauth::{refresh_oauth_credential, unix_timestamp};
 use crate::auth::storage::{CredentialStorage, StoredCredential};
+use crate::auth::{LOGIN_COMMAND, oauth::oauth_http_client};
 use crate::error::{Error, Result};
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -76,9 +77,24 @@ impl CredentialProvider {
     ///
     /// Returns an error when no saved credential exists or it cannot be read.
     pub fn load(storage: CredentialStorage) -> Result<Self> {
+        Self::load_with_login_command(storage, LOGIN_COMMAND)
+    }
+
+    /// Load the active credential and use a deployment-specific login command
+    /// in the missing-credentials error.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when no saved credential exists or it cannot be read.
+    pub fn load_with_login_command(
+        storage: CredentialStorage,
+        login_command: &str,
+    ) -> Result<Self> {
         let credential = storage.load()?.ok_or_else(|| {
             Error::AuthError(
-                "No credentials found. Run 'nunu-cli auth login' or set NUNU_API_KEY.".to_string(),
+                format!(
+                    "No Nunu credentials found. Run '{login_command}' before starting the MCP server, or set NUNU_API_KEY."
+                ),
             )
         })?;
         Self::from_credential(credential, Some(storage))
@@ -308,6 +324,29 @@ mod tests {
             expires_at: 0,
             scope: None,
         })
+    }
+
+    #[test]
+    fn missing_credentials_include_the_npx_login_command() {
+        let directory = tempfile::tempdir().expect("directory");
+        let storage = CredentialStorage::file_only(directory.path().to_path_buf());
+
+        let error = CredentialProvider::load(storage).expect_err("missing credentials");
+
+        assert!(error.to_string().contains(LOGIN_COMMAND));
+    }
+
+    #[test]
+    fn missing_credentials_can_include_a_custom_deployment() {
+        let directory = tempfile::tempdir().expect("directory");
+        let storage = CredentialStorage::file_only(directory.path().to_path_buf());
+        let login_command = crate::auth::login_command("https://staging.nunu.ai");
+
+        let error = CredentialProvider::load_with_login_command(storage, &login_command)
+            .expect_err("missing credentials");
+
+        assert!(error.to_string().contains(&login_command));
+        assert!(!error.to_string().contains(crate::auth::DEFAULT_BASE_URL));
     }
 
     #[test]

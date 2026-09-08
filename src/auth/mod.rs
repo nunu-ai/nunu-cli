@@ -11,6 +11,24 @@ pub use storage::{CredentialStorage, StoredCredential, StoredOAuthCredential};
 use crate::error::{Error, Result};
 
 pub const DEFAULT_BASE_URL: &str = "https://nunu.ai";
+pub const LOGIN_COMMAND: &str = "npx --yes @nunu-ai/nunu-cli auth login";
+
+#[must_use]
+pub fn login_command(base_url: &str) -> String {
+    let is_default = endpoint_url(base_url, "mcp")
+        .is_ok_and(|mcp_url| mcp_url == format!("{DEFAULT_BASE_URL}/mcp"));
+    if is_default {
+        LOGIN_COMMAND.to_string()
+    } else {
+        format!("{LOGIN_COMMAND} --base-url '{base_url}'")
+    }
+}
+
+#[must_use]
+pub fn login_command_for_mcp_url(mcp_url: &str) -> String {
+    let base_url = mcp_url.strip_suffix("/mcp").unwrap_or(DEFAULT_BASE_URL);
+    login_command(base_url)
+}
 
 /// Derive an API or MCP endpoint from a Nunu deployment base URL.
 /// Localhost HTTP URLs are accepted for local development.
@@ -110,5 +128,18 @@ mod tests {
     fn rejects_ambiguous_or_insecure_base_urls() {
         assert!(endpoint_url("https://nunu.ai/something", "api").is_err());
         assert!(endpoint_url("http://nunu.ai", "api").is_err());
+    }
+
+    #[test]
+    fn login_command_targets_non_default_deployments() {
+        assert_eq!(login_command(DEFAULT_BASE_URL), LOGIN_COMMAND);
+        assert_eq!(
+            login_command("https://staging.nunu.ai/"),
+            "npx --yes @nunu-ai/nunu-cli auth login --base-url 'https://staging.nunu.ai/'"
+        );
+        assert_eq!(
+            login_command_for_mcp_url("https://staging.nunu.ai/mcp"),
+            "npx --yes @nunu-ai/nunu-cli auth login --base-url 'https://staging.nunu.ai'"
+        );
     }
 }

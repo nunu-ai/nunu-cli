@@ -9,7 +9,8 @@ use nunu_cli::{
     api::client::{BuildDetails, UploadInfo},
     auth::{
         CredentialProvider, CredentialStorage, DEFAULT_BASE_URL, OAuthLoginOptions,
-        StoredCredential, endpoint_url, login_with_oauth, save_api_key, validate_mcp_credential,
+        StoredCredential, endpoint_url, login_command, login_with_oauth, save_api_key,
+        validate_mcp_credential,
     },
     ci_metadata::collect_ci_metadata,
     mcp::serve_stdio,
@@ -298,13 +299,17 @@ async fn main() -> Result<()> {
             api_key,
             workspace_root,
         } => {
+            let mcp_url = endpoint_url(&cli.base_url, "mcp")?;
+            let api_url = endpoint_url(&cli.base_url, "api")?;
+            let login_command = login_command(&cli.base_url);
             let credential = if let Some(api_key) = api_key.or(token) {
                 CredentialProvider::api_key(api_key)?
             } else {
-                CredentialProvider::load(CredentialStorage::discover()?)?
+                CredentialProvider::load_with_login_command(
+                    CredentialStorage::discover()?,
+                    &login_command,
+                )?
             };
-            let mcp_url = endpoint_url(&cli.base_url, "mcp")?;
-            let api_url = endpoint_url(&cli.base_url, "api")?;
             serve_stdio(&mcp_url, &api_url, credential, workspace_root.as_deref()).await?;
             Ok(String::new())
         }
@@ -776,7 +781,9 @@ async fn main() -> Result<()> {
                 }
                 AuthCommands::Status => {
                     let Some(credential) = storage.load()? else {
-                        println!("Not authenticated. Run 'nunu-cli auth login'.");
+                        println!(
+                            "Not authenticated. Run 'npx --yes @nunu-ai/nunu-cli auth login'."
+                        );
                         return Ok(());
                     };
 
@@ -815,7 +822,7 @@ async fn main() -> Result<()> {
     match result {
         Ok(_) => Ok(()),
         Err(e) => {
-            error!("{e}");
+            error!("{e:#}");
             std::process::exit(1);
         }
     }

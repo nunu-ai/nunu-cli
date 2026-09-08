@@ -4,6 +4,7 @@ on: push
 
 jobs:
   build:
+    if: github.actor != 'nunu-release[bot]'
     strategy:
       matrix:
         os: [[self-hosted, nix, macOS], [self-hosted, nix, Linux]]
@@ -16,7 +17,7 @@ jobs:
         run: nunu-upload-to-cache
 
   release:
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' && github.actor != 'nunu-release[bot]'
     permissions:
       contents: "write"
     runs-on: [self-hosted, nix, Linux]
@@ -25,15 +26,35 @@ jobs:
       version: ${{ steps.get-version.outputs.version }}
       released: ${{ steps.get-version.outputs.released }}
     steps:
-      - uses: actions/checkout@v4
+      - name: Generate app token
+        id: app-token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ vars.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
           fetch-tags: true
+          token: ${{ steps.app-token.outputs.token }}
+
+      - name: Get release app bot user ID
+        id: release-app-bot
+        uses: actions/github-script@v8
+        with:
+          github-token: ${{ steps.app-token.outputs.token }}
+          result-encoding: string
+          script: |
+            const { data: user } = await github.rest.users.getByUsername({
+              username: '${{ steps.app-token.outputs.app-slug }}[bot]',
+            });
+            return String(user.id);
 
       - name: Release
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config user.name "${{ steps.app-token.outputs.app-slug }}[bot]"
+          git config user.email "${{ steps.release-app-bot.outputs.result }}+${{ steps.app-token.outputs.app-slug }}[bot]@users.noreply.github.com"
           nix run .#bump-version
 
       - name: Pull new tag

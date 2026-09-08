@@ -21,7 +21,7 @@ pub enum Error {
     AuthError(String),
 
     #[error(
-        "Authentication failed: the OAuth session is no longer valid; run 'nunu-cli auth login' again"
+        "Authentication failed: the OAuth session is no longer valid; run 'npx --yes @nunu-ai/nunu-cli auth login' again"
     )]
     AuthSessionExpired,
 

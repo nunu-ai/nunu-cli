@@ -1,7 +1,7 @@
 mod tools;
 
 use crate::{
-    auth::{AuthHeader, CredentialProvider},
+    auth::{AuthHeader, CredentialProvider, login_command_for_mcp_url},
     config::Config,
 };
 use anyhow::{Context as _, Result};
@@ -63,7 +63,11 @@ impl AuthenticatedHttpClient {
         StreamableHttpError<reqwest::Error>,
     > {
         match self.credential.header().await.map_err(|error| {
-            StreamableHttpError::Auth(AuthError::AuthorizationFailed(error.to_string()))
+            let auth_error = match error {
+                crate::error::Error::AuthSessionExpired => AuthError::AuthorizationRequired,
+                error => AuthError::AuthorizationFailed(error.to_string()),
+            };
+            StreamableHttpError::Auth(auth_error)
         })? {
             AuthHeader::ApiKey(api_key) => {
                 let value = HeaderValue::from_str(&api_key).map_err(|_| {
@@ -92,7 +96,11 @@ impl AuthenticatedHttpClient {
             .refresh_after_unauthorized(rejected_access_token)
             .await
             .map_err(|error| {
-                StreamableHttpError::Auth(AuthError::TokenRefreshFailed(error.to_string()))
+                let auth_error = match error {
+                    crate::error::Error::AuthSessionExpired => AuthError::AuthorizationRequired,
+                    error => AuthError::TokenRefreshFailed(error.to_string()),
+                };
+                StreamableHttpError::Auth(auth_error)
             })
     }
 }
@@ -106,6 +114,19 @@ fn is_unauthorized<T>(
             error.status() == Some(reqwest::StatusCode::UNAUTHORIZED)
         }
         _ => false,
+    }
+}
+
+fn upstream_startup_error(
+    error: rmcp::service::ClientInitializeError,
+    login_command: &str,
+) -> anyhow::Error {
+    if error.is_authorization_required() {
+        anyhow::anyhow!(
+            "Nunu MCP authentication is required. Run '{login_command}' and restart your MCP client, or set NUNU_API_KEY."
+        )
+    } else {
+        anyhow::Error::new(error).context("failed to connect to the Nunu MCP")
     }
 }
 
@@ -353,10 +374,11 @@ pub async fn serve_stdio(
         ClientCapabilities::default(),
         Implementation::new("nunu-cli", env!("CARGO_PKG_VERSION")),
     );
+    let login_command = login_command_for_mcp_url(mcp_url);
     let mut upstream = client_info
         .serve(transport)
         .await
-        .context("failed to connect to the Nunu MCP")?;
+        .map_err(|error| upstream_startup_error(error, &login_command))?;
     let remote_tools = upstream
         .list_all_tools()
         .await
@@ -558,5 +580,20 @@ mod tests {
     fn api_key_header_is_not_reserved_by_mcp() {
         let name = HeaderName::from_static(API_KEY_HEADER);
         assert_eq!(name.as_str(), API_KEY_HEADER);
+    }
+
+    #[test]
+    fn non_auth_upstream_errors_keep_the_connection_context() {
+        let error = upstream_startup_error(
+            rmcp::service::ClientInitializeError::ConnectionClosed(
+                "initialize response".to_string(),
+            ),
+            crate::auth::LOGIN_COMMAND,
+        );
+
+        assert_eq!(
+            format!("{error:#}"),
+            "failed to connect to the Nunu MCP: connection closed: initialize response"
+        );
     }
 }
