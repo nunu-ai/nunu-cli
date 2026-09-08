@@ -1,8 +1,20 @@
 # Changelog
 
-## [v0.1.25](https://github.com/nunu-ai/nunu-cli/compare/v0.1.24...8e4fd25ef26d3a8a1fcb99da314bc185c8724509) (2026-09-08)
+## [v0.1.26](https://github.com/nunu-ai/nunu-cli/compare/v0.1.25...df5b3849b3d366daf19c1733c2f68d566c96da32) (2026-09-08)
+
+### Features
+
+* nice oauth page
+([808afd7](https://github.com/nunu-ai/nunu-cli/commit/808afd764ed39a16c4298878dcab1942182e2d93))
 
 ### Fixes
+
+* build
+([df5b384](https://github.com/nunu-ai/nunu-cli/commit/df5b3849b3d366daf19c1733c2f68d566c96da32))
+
+### [v0.1.25](https://github.com/nunu-ai/nunu-cli/compare/v0.1.24...v0.1.25) (2026-09-08)
+
+#### Fixes
 
 * local logout
 ([8e4fd25](https://github.com/nunu-ai/nunu-cli/commit/8e4fd25ef26d3a8a1fcb99da314bc185c8724509))
