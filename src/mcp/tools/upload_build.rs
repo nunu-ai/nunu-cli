@@ -4,7 +4,6 @@ use crate::{
         Client,
         client::{BuildDetails, BuildPlatform, UploadInfo},
     },
-    auth::StoredCredential,
     ci_metadata::collect_ci_metadata,
     config::Config,
     metadata::collect_git_metadata,
@@ -42,6 +41,7 @@ struct InitiatedUpload {
 struct UploadBuildInput {
     path: String,
     name: String,
+    project_id: String,
     platform: Option<BuildPlatform>,
     tags: Option<Vec<String>>,
 }
@@ -56,14 +56,11 @@ impl UploadBuildTool {
 
     async fn upload(&self, input: UploadBuildInput) -> Result<CallToolResult> {
         validate_input(&input)?;
-        anyhow::ensure!(
-            self.config.project_id.is_some()
-                || !matches!(
-                    self.config.credential.snapshot().await,
-                    StoredCredential::OAuth(_)
-                ),
-            "OAuth uploads require NUNU_PROJECT_ID or the MCP --project-id option"
-        );
+        let config = Config::with_credential(
+            self.config.credential.clone(),
+            &self.config.api_url,
+            Some(input.project_id.clone()),
+        )?;
         let path = self.validate_path(&input.path).await?;
         let path_text = path
             .to_str()
@@ -77,7 +74,6 @@ impl UploadBuildTool {
             .platform
             .clone()
             .map_or_else(|| infer_platform(&path), Ok)?;
-        let project_id = self.config.project_id.clone();
         let initiated = Arc::new(Mutex::new(None::<InitiatedUpload>));
         let initiated_for_callback = Arc::clone(&initiated);
         let mut options = build_options(&input, &platform);
@@ -90,17 +86,17 @@ impl UploadBuildTool {
                 });
             }
         }));
-        let build_id = match upload_file(&self.config, path_text, options).await {
+        let build_id = match upload_file(&config, path_text, options).await {
             Ok(build_id) => build_id,
             Err(error) => {
-                self.abort_if_initiated(&initiated).await;
+                Self::abort_if_initiated(&config, &initiated).await;
                 return Err(error.into());
             }
         };
         let structured = serde_json::json!({
             "status": "uploaded",
             "build_id": build_id,
-            "project_id": project_id,
+            "project_id": input.project_id,
             "name": input.name,
             "file_name": file_name,
         });
@@ -113,7 +109,13 @@ impl UploadBuildTool {
     }
 
     async fn validate_path(&self, requested: &str) -> Result<PathBuf> {
-        let path = tokio::fs::canonicalize(requested)
+        let requested_path = Path::new(requested);
+        let candidate = if requested_path.is_absolute() {
+            requested_path.to_path_buf()
+        } else {
+            self.allowed_root.join(requested_path)
+        };
+        let path = tokio::fs::canonicalize(&candidate)
             .await
             .with_context(|| format!("cannot access the requested build file '{requested}'"))?;
         let metadata = tokio::fs::metadata(&path)
@@ -130,13 +132,13 @@ impl UploadBuildTool {
         Ok(path)
     }
 
-    async fn abort_if_initiated(&self, initiated: &Mutex<Option<InitiatedUpload>>) {
+    async fn abort_if_initiated(config: &Config, initiated: &Mutex<Option<InitiatedUpload>>) {
         let active = initiated
             .lock()
             .ok()
             .and_then(|active| active.as_ref().cloned());
         if let Some(active) = active
-            && let Ok(client) = Client::new(self.config.clone())
+            && let Ok(client) = Client::new(config.clone())
         {
             let _ = client
                 .abort_upload(
@@ -182,6 +184,10 @@ impl LocalTool for UploadBuildTool {
 fn validate_input(input: &UploadBuildInput) -> Result<()> {
     anyhow::ensure!(!input.path.trim().is_empty(), "path cannot be empty");
     anyhow::ensure!(!input.name.trim().is_empty(), "name cannot be empty");
+    anyhow::ensure!(
+        !input.project_id.trim().is_empty(),
+        "project_id cannot be empty"
+    );
     if let Some(tags) = &input.tags {
         for tag in tags {
             anyhow::ensure!(!tag.is_empty(), "tags cannot be empty");
@@ -252,12 +258,17 @@ fn definition() -> Tool {
             "path": {
                 "type": "string",
                 "minLength": 1,
-                "description": "Path to one local build artifact file. Globs and directories are not supported."
+                "description": "Absolute path to one local build artifact file, or a path relative to the configured MCP workspace root. Globs and directories are not supported."
             },
             "name": {
                 "type": "string",
                 "minLength": 1,
                 "description": "Display name for the build."
+            },
+            "project_id": {
+                "type": "string",
+                "minLength": 1,
+                "description": "ID of the Nunu project that will receive the build."
             },
             "platform": {
                 "type": "string",
@@ -273,14 +284,14 @@ fn definition() -> Tool {
                 "description": "Optional tags to attach to the build."
             }
         },
-        "required": ["path", "name"]
+        "required": ["path", "name", "project_id"]
     });
     let output_schema = serde_json::json!({
         "type": "object",
         "properties": {
             "status": { "type": "string", "const": "uploaded" },
             "build_id": { "type": "string" },
-            "project_id": { "type": ["string", "null"] },
+            "project_id": { "type": "string" },
             "name": { "type": "string" },
             "file_name": { "type": "string" }
         },
@@ -316,7 +327,11 @@ mod tests {
             .expect("input properties");
         let mut names: Vec<_> = properties.keys().map(String::as_str).collect();
         names.sort_unstable();
-        assert_eq!(names, ["name", "path", "platform", "tags"]);
+        assert_eq!(names, ["name", "path", "platform", "project_id", "tags"]);
+        assert_eq!(
+            tool.input_schema["required"],
+            serde_json::json!(["path", "name", "project_id"])
+        );
         assert_eq!(
             tool.annotations.as_ref().and_then(|a| a.read_only_hint),
             Some(false)
@@ -336,6 +351,7 @@ mod tests {
         let input = UploadBuildInput {
             path: "app.apk".to_string(),
             name: "Release".to_string(),
+            project_id: "project_123".to_string(),
             platform: None,
             tags: Some(vec!["stable".to_string()]),
         };
@@ -381,6 +397,14 @@ mod tests {
             inside_file
                 .canonicalize()
                 .expect("canonicalize inside file")
+        );
+        assert_eq!(
+            tool.validate_path("app.apk")
+                .await
+                .expect("resolve relative path from allowed root"),
+            inside_file
+                .canonicalize()
+                .expect("canonicalize relative inside file")
         );
         assert!(
             tool.validate_path(outside_file.to_str().expect("outside path"))

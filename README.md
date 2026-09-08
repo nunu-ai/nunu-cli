@@ -191,13 +191,16 @@ endpoint. The command writes only MCP protocol messages to stdout; diagnostics
 and logs go to stderr.
 
 The local server adds an `upload_build` tool and overrides a remote tool with
-the same name. It accepts one local file path, a display name, an optional
-platform, and optional tags. The platform is inferred for common build formats;
-archives and other ambiguous formats require it explicitly. Files are limited
-to the MCP process working directory after resolving symlinks. Set
-`NUNU_PROJECT_ID` (or pass `nunu-cli mcp --project-id ...`) when the credential
-requires explicit project scope. Upload metadata records `mcp` as the method
-automatically; this is not a model-provided tool argument.
+the same name. It accepts one local file path, a display name, the target
+project ID, an optional platform, and optional tags. The platform is inferred
+for common build formats; archives and other ambiguous formats require it
+explicitly. By default, files are limited to the MCP process working directory
+after resolving symlinks. Set `--workspace-root /absolute/path/to/project` or
+`NUNU_WORKSPACE_ROOT` when the MCP host does not launch the server from the
+project directory (for example, a packaged Claude Desktop extension). The
+`path` argument may be absolute or relative to that workspace root. Upload
+metadata records `mcp` as the method automatically; this is not a model-
+provided tool argument.
 
 ## Automatic Metadata Collection
 

@@ -25,7 +25,11 @@ use rmcp::{
     },
 };
 use sse_stream::Sse;
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::HashMap,
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 use tools::LocalToolRegistry;
 
 const API_KEY_HEADER: &str = "x-api-key";
@@ -333,13 +337,11 @@ impl ServerHandler for ProxyServer {
 pub async fn serve_stdio(
     mcp_url: &str,
     api_url: &str,
-    project_id: Option<String>,
     credential: CredentialProvider,
+    workspace_root: Option<&Path>,
 ) -> Result<()> {
-    let allowed_root = tokio::fs::canonicalize(std::env::current_dir()?)
-        .await
-        .context("failed to resolve the MCP server working directory")?;
-    let upload_config = Config::with_credential(credential.clone(), api_url, project_id)?;
+    let allowed_root = resolve_allowed_root(workspace_root).await?;
+    let upload_config = Config::with_credential(credential.clone(), api_url, None)?;
     let local_tools = Arc::new(LocalToolRegistry::standard(upload_config, allowed_root));
     let client = AuthenticatedHttpClient::new(credential)?;
     let transport = StreamableHttpClientTransport::with_client(
@@ -380,6 +382,34 @@ pub async fn serve_stdio(
         result.context("stdio MCP server task failed")?;
     }
     Ok(())
+}
+
+async fn resolve_allowed_root(workspace_root: Option<&Path>) -> Result<PathBuf> {
+    let requested_root = match workspace_root {
+        Some(path) => path.to_path_buf(),
+        None => std::env::current_dir()
+            .context("failed to determine the MCP server working directory")?,
+    };
+    let allowed_root = tokio::fs::canonicalize(&requested_root)
+        .await
+        .with_context(|| {
+            format!(
+                "failed to resolve the MCP workspace root '{}'",
+                requested_root.display()
+            )
+        })?;
+    let metadata = tokio::fs::metadata(&allowed_root).await.with_context(|| {
+        format!(
+            "failed to inspect the MCP workspace root '{}'",
+            allowed_root.display()
+        )
+    })?;
+    anyhow::ensure!(
+        metadata.is_dir(),
+        "the MCP workspace root '{}' is not a directory",
+        allowed_root.display()
+    );
+    Ok(allowed_root)
 }
 
 #[cfg(test)]

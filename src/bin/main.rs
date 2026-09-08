@@ -18,7 +18,7 @@ use nunu_cli::{
 };
 use std::collections::HashMap;
 use std::io::Write;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
@@ -61,9 +61,9 @@ enum Commands {
         #[arg(long, env = "NUNU_API_KEY", conflicts_with = "token", hide = true)]
         api_key: Option<String>,
 
-        /// Project ID used by local tools such as `upload_build`
-        #[arg(long, env = "NUNU_PROJECT_ID")]
-        project_id: Option<String>,
+        /// Root directory that local MCP tools may access (defaults to the process working directory)
+        #[arg(long, env = "NUNU_WORKSPACE_ROOT", value_name = "PATH")]
+        workspace_root: Option<PathBuf>,
     },
 
     /// Upload a build artifact
@@ -296,7 +296,7 @@ async fn main() -> Result<()> {
         Commands::Mcp {
             token,
             api_key,
-            project_id,
+            workspace_root,
         } => {
             let credential = if let Some(api_key) = api_key.or(token) {
                 CredentialProvider::api_key(api_key)?
@@ -305,7 +305,7 @@ async fn main() -> Result<()> {
             };
             let mcp_url = endpoint_url(&cli.base_url, "mcp")?;
             let api_url = endpoint_url(&cli.base_url, "api")?;
-            serve_stdio(&mcp_url, &api_url, project_id, credential).await?;
+            serve_stdio(&mcp_url, &api_url, credential, workspace_root.as_deref()).await?;
             Ok(String::new())
         }
         Commands::Upload {
