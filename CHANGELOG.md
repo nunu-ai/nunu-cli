@@ -1,8 +1,15 @@
 # Changelog
 
-## [v0.1.21](https://github.com/nunu-ai/nunu-cli/compare/v0.1.20...b87937110a8f666c45705355f337bb3a8b766682) (2026-09-08)
+## [v0.1.22](https://github.com/nunu-ai/nunu-cli/compare/v0.1.21...a6518947ad05f6c106cd29ec60e2159e9d74fba8) (2026-09-08)
 
-### Features
+### Fixes
+
+* link oauth to base url
+([a651894](https://github.com/nunu-ai/nunu-cli/commit/a6518947ad05f6c106cd29ec60e2159e9d74fba8))
+
+### [v0.1.21](https://github.com/nunu-ai/nunu-cli/compare/v0.1.20...v0.1.21) (2026-09-08)
+
+#### Features
 
 * update readme
 ([7ce513f](https://github.com/nunu-ai/nunu-cli/commit/7ce513f91a992978a6bc846a5b9bf9b613ef3426))
@@ -17,7 +24,7 @@
 * oauth support
 ([3ebe4ce](https://github.com/nunu-ai/nunu-cli/commit/3ebe4ce9b182d3cb6a66cb108bdea34c6624207d))
 
-### Fixes
+#### Fixes
 
 * windows build
 ([c4aa48a](https://github.com/nunu-ai/nunu-cli/commit/c4aa48a08cca561f2da0d02d4638cfb340bc2f08))
