@@ -12,6 +12,7 @@ use nunu_cli::{
         StoredCredential, endpoint_url, login_with_oauth, save_api_key, validate_mcp_credential,
     },
     ci_metadata::collect_ci_metadata,
+    mcp::serve_stdio,
     metadata::collect_git_metadata,
     upload_file,
 };
@@ -50,6 +51,17 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+    /// Run the local Nunu MCP server over stdin/stdout
+    Mcp {
+        /// API token for authentication (legacy alias for --api-key)
+        #[arg(long, env = "NUNU_API_TOKEN", hide = true)]
+        token: Option<String>,
+
+        /// API key for authentication
+        #[arg(long, env = "NUNU_API_KEY", conflicts_with = "token", hide = true)]
+        api_key: Option<String>,
+    },
+
     /// Upload a build artifact
     #[command(override_usage = "<FILES>... [OPTIONS]")]
     Upload {
@@ -142,7 +154,7 @@ fn infer_platform(file_path: &str) -> Result<BuildPlatform> {
     let path = Path::new(file_path);
     let extension = path
         .extension()
-        .and_then(|e| e.to_str())
+        .and_then(|extension| extension.to_str())
         .unwrap_or("")
         .to_lowercase();
 
@@ -277,6 +289,16 @@ async fn main() -> Result<()> {
     }
 
     let result: Result<String> = match cli.command {
+        Commands::Mcp { token, api_key } => {
+            let credential = if let Some(api_key) = api_key.or(token) {
+                CredentialProvider::api_key(api_key)?
+            } else {
+                CredentialProvider::load(CredentialStorage::discover()?)?
+            };
+            let mcp_url = endpoint_url(&cli.base_url, "mcp")?;
+            serve_stdio(&mcp_url, credential).await?;
+            Ok(String::new())
+        }
         Commands::Upload {
             files,
             token,
@@ -784,7 +806,7 @@ async fn main() -> Result<()> {
     match result {
         Ok(_) => Ok(()),
         Err(e) => {
-            error!("Upload failed: {e}");
+            error!("{e}");
             std::process::exit(1);
         }
     }

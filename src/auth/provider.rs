@@ -169,7 +169,10 @@ impl CredentialProvider {
         self.state.lock().await.clone()
     }
 
-    async fn refresh_after_unauthorized(&self, rejected_access_token: &str) -> Result<()> {
+    pub(crate) async fn refresh_after_unauthorized(
+        &self,
+        rejected_access_token: &str,
+    ) -> Result<()> {
         let mut state = self.state.lock().await;
         let StoredCredential::OAuth(credential) = &*state else {
             return Ok(());

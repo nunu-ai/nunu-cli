@@ -159,6 +159,37 @@ Plain HTTP is accepted only for localhost. Credentials are stored in the
 operating-system credential store, with a user-permission-only file fallback
 for headless systems. Project JSON files are not used for credentials.
 
+## MCP proxy
+
+`nunu-cli mcp` exposes the Nunu remote MCP as a local stdio MCP server. It
+uses the same saved OAuth session or API-key environment variable as the upload
+command, and refreshes OAuth access tokens while the process is running.
+
+Authenticate before starting the server:
+
+```bash
+nunu-cli auth login
+nunu-cli mcp
+```
+
+Configure an MCP host to launch the installed binary:
+
+```json
+{
+  "mcpServers": {
+    "nunu": {
+      "command": "nunu-cli",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+For non-interactive use, set `NUNU_API_KEY` in the MCP server environment.
+`NUNU_BASE_URL` selects another Nunu deployment and still derives its `/mcp`
+endpoint. The command writes only MCP protocol messages to stdout; diagnostics
+and logs go to stderr.
+
 ## Automatic Metadata Collection
 
 The CLI automatically detects and collects metadata from your environment:

@@ -3,7 +3,9 @@
 pub mod ci_metadata;
 pub mod config;
 pub mod error;
+pub mod mcp;
 pub mod metadata;
+mod tls;
 
 pub mod auth;
 
