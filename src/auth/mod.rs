@@ -66,7 +66,7 @@ pub async fn validate_mcp_credential(mcp_url: &str, credential: StoredCredential
             }
         }
     });
-    let http = reqwest::Client::builder()
+    let http = crate::tls::http_client_builder()?
         .redirect(reqwest::redirect::Policy::none())
         .timeout(std::time::Duration::from_secs(30))
         .build()?;

@@ -33,8 +33,7 @@ struct AuthenticatedHttpClient {
 
 impl AuthenticatedHttpClient {
     fn new(credential: CredentialProvider) -> Result<Self> {
-        crate::tls::ensure_crypto_provider()?;
-        let http = reqwest::Client::builder()
+        let http = crate::tls::http_client_builder()?
             .pool_max_idle_per_host(0)
             .redirect(reqwest::redirect::Policy::none())
             .build()

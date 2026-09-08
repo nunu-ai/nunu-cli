@@ -38,7 +38,7 @@ pub async fn upload_multipart(
         file_size / 1024 / 1024
     );
 
-    let client = Client::new(config.clone());
+    let client = Client::new(config.clone())?;
 
     // Step 1: Initiate multipart upload
     let initiate_response = client

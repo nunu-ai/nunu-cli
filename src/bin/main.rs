@@ -584,7 +584,7 @@ async fn main() -> Result<()> {
                         let uploads = active_uploads.read().await;
                         if !uploads.is_empty() {
                             eprintln!("⏳ Attempting to abort {} active upload(s)...", uploads.len());
-                            let client = Client::new(config.clone());
+                            let client = Client::new(config.clone())?;
 
                             for (file_path, metadata) in uploads.iter() {
                                 debug!("Aborting upload for {file_path}: build_id={}", metadata.build_id);
@@ -619,7 +619,7 @@ async fn main() -> Result<()> {
                         let uploads = active_uploads.read().await;
                         if !uploads.is_empty() {
                             eprintln!("⏳ Attempting to abort {} active upload(s)...", uploads.len());
-                            let client = Client::new(config.clone());
+                            let client = Client::new(config.clone())?;
 
                             for (file_path, metadata) in uploads.iter() {
                                 debug!("Aborting upload for {file_path}: build_id={}", metadata.build_id);
@@ -656,7 +656,7 @@ async fn main() -> Result<()> {
                         let uploads = active_uploads.read().await;
                         if !uploads.is_empty() {
                             eprintln!("⏳ Attempting to abort {} active upload(s)...", uploads.len());
-                            let client = Client::new(config.clone());
+                            let client = Client::new(config.clone())?;
 
                             for (file_path, metadata) in uploads.iter() {
                                 debug!("Aborting upload for {file_path}: build_id={}", metadata.build_id);

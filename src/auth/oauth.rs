@@ -232,8 +232,7 @@ pub(super) async fn refresh_oauth_credential(
 }
 
 pub(super) fn oauth_http_client() -> Result<reqwest::Client> {
-    crate::tls::ensure_crypto_provider()?;
-    reqwest::Client::builder()
+    crate::tls::http_client_builder()?
         .redirect(Policy::none())
         .timeout(HTTP_TIMEOUT)
         .build()

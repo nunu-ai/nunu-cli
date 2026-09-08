@@ -1606,6 +1606,7 @@ dependencies = [
  "tokio",
  "tokio-util",
  "url",
+ "webpki-root-certs",
  "winres",
 ]
 
