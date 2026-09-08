@@ -1,299 +1,120 @@
 # nunu-cli
 
-CLI tool for uploading build artifacts to nunu.ai.
+Upload build artifacts to [Nunu](https://nunu.ai) from your terminal or CI.
 
-## Installation
+## Install
 
-Download the latest release from [GitHub Releases](https://github.com/nunu-ai/nunu-cli/releases).
-
-### Linux
-
-**Latest version (recommended):**
-```bash
-curl -L -O https://github.com/nunu-ai/nunu-cli/releases/latest/download/nunu-cli-linux-x86_64
-chmod +x nunu-cli-linux-x86_64
-sudo mv nunu-cli-linux-x86_64 /usr/local/bin/nunu-cli
-```
-
-**Specific version:**
-```bash
-VERSION=0.1.15  # Replace with desired version
-curl -L -O https://github.com/nunu-ai/nunu-cli/releases/download/v${VERSION}/nunu-cli-linux-x86_64
-chmod +x nunu-cli-linux-x86_64
-sudo mv nunu-cli-linux-x86_64 /usr/local/bin/nunu-cli
-```
-
-### macOS
-
-**ARM64 (Apple Silicon) - Latest version (recommended):**
-```bash
-curl -L -O https://github.com/nunu-ai/nunu-cli/releases/latest/download/nunu-cli-macos-arm64
-chmod +x nunu-cli-macos-arm64
-sudo mv nunu-cli-macos-arm64 /usr/local/bin/nunu-cli
-```
-
-**x86_64 (Intel) - Latest version:**
-```bash
-curl -L -O https://github.com/nunu-ai/nunu-cli/releases/latest/download/nunu-cli-macos-x86_64
-chmod +x nunu-cli-macos-x86_64
-sudo mv nunu-cli-macos-x86_64 /usr/local/bin/nunu-cli
-```
-
-**Specific version:**
-```bash
-VERSION=0.1.15  # Replace with desired version
-ARCH=arm64      # or x86_64 for Intel Macs
-curl -L -O https://github.com/nunu-ai/nunu-cli/releases/download/v${VERSION}/nunu-cli-macos-${ARCH}
-chmod +x nunu-cli-macos-${ARCH}
-sudo mv nunu-cli-macos-${ARCH} /usr/local/bin/nunu-cli
-```
-
-> **Note:** Apple Silicon Macs can run either binary. The ARM64 version is native and recommended for best performance.
-
-### Windows
-
-**Latest version:** Download [nunu-cli-windows-x86_64.exe](https://github.com/nunu-ai/nunu-cli/releases/latest/download/nunu-cli-windows-x86_64.exe) and rename to `nunu-cli.exe`.
-
-**Specific version:** Visit the [releases page](https://github.com/nunu-ai/nunu-cli/releases), select your version, and download `nunu-cli-windows-x86_64.exe`.
-
-### npm / npx
-
-The CLI and local MCP server can also be run without a system-wide install:
+Requires Node.js 18 or newer.
 
 ```bash
-npx --yes @nunu-ai/nunu-cli@0.1.20 --version
-npx --yes @nunu-ai/nunu-cli@0.1.20 auth login
+npm install --global @nunu-ai/nunu-cli
+nunu-cli --version
 ```
 
-Pin the version in MCP host configuration for reproducible behavior. The npm
-launcher installs only the native binary for the current operating system and
-CPU architecture.
+Or run it without installing:
 
-## Quick Start
 ```bash
-# Interactive browser login (recommended for local development)
-nunu-cli auth login
-
-# Upload a build
-nunu-cli upload build/app.apk --project-id your-project --name "Production v1.2.3"
+npx --yes @nunu-ai/nunu-cli --version
 ```
 
-Platform is automatically detected from file extension.
+The npm package includes native binaries for Linux x64, macOS x64/ARM64, and
+Windows x64.
 
-## Usage
-```bash
-# Single file
-nunu-cli upload <file> --name "Build Name"
-
-# Pattern matching when filename is unknown (common in CI/CD)
-nunu-cli upload "build/app-v*.apk" --name "Android Release"
-nunu-cli upload "dist/myapp-*.exe" --name "Windows Build"
-
-# With options
-nunu-cli upload "build/app-*.exe" \
-  --name "Windows Build" \
-  --description "Release build" \
-  --auto-delete \
-  --tags "version:1.2.3,env:prod"
-
-# Show all options
-nunu-cli upload --help
-```
-
-### File Pattern Matching
-
-Use glob patterns when you don't know the exact filename:
-
-- `*` - Matches any characters: `app-v*.apk`, `build-*.zip`
-- `?` - Matches single character: `app-?.apk`
-- `[...]` - Matches character sets: `app-[123].apk`, `build-[0-9].exe`
-
-Common use case: Build tools add version numbers or timestamps to filenames. Pattern matching lets you upload without knowing the exact name.
-
-If multiple files match, each becomes a separate build with the filename appended to your name template.
-
-### Key Options
-
-- `--platform <PLATFORM>` - Target platform (auto-detected if possible)
-- `--auto-delete` - Auto-delete old builds when storage is full
-- `--tags <TAGS>` - Comma-separated tags for organization
-- `--parallel <N>` - Parallel uploads (1-32, default: 4)
-- `-v, --verbose` - Enable detailed logging
-
-### Platform Detection
-
-Automatically detected: `.apk` (android), `.ipa` (ios-native), `.exe/.msi` (windows), `.dmg/.pkg` (macos), `.deb/.rpm/.appimage` (linux)
-
-For ambiguous files (`.zip`, `.tar`), specify `--platform` explicitly.
-
-## Authentication
-
-For an interactive developer session, log in with OAuth:
+## Log in
 
 ```bash
 nunu-cli auth login
-nunu-cli auth status
-nunu-cli auth logout
 ```
 
-To save an API key instead, use the hidden prompt:
+Use `nunu-cli auth status` to check the current login and `nunu-cli auth logout`
+to remove it. To save an API key instead of using browser login, run:
 
 ```bash
 nunu-cli auth login --api-key
 ```
 
-For CI, provide an API key through the environment instead of saving a login:
+## Upload a build
 
 ```bash
-export NUNU_API_KEY=your_api_key
-export NUNU_PROJECT_ID=your_project
-nunu-cli upload build/app.apk --name "CI build"
+nunu-cli upload build/app.apk \
+  --project-id your-project-id \
+  --name "Production 1.2.3"
 ```
 
-`NUNU_API_TOKEN` remains supported as a legacy alias for `NUNU_API_KEY`.
-
-### Self-hosted and local development
-
-The CLI uses `https://nunu.ai` by default and derives the API and MCP endpoints
-as `/api` and `/mcp`. Override the single base URL when developing locally:
+Globs and multiple files are supported:
 
 ```bash
-export NUNU_BASE_URL=http://localhost:3000
-nunu-cli auth login
+nunu-cli upload "build/*.apk" --project-id your-project-id --name "CI build"
 ```
 
-The CLI also loads `.env`, so a local file can contain:
+The platform is inferred for `.apk`, `.ipa`, `.exe`, `.msi`, `.dmg`, `.pkg`,
+`.deb`, `.rpm`, and `.AppImage` files. Use `--platform` for archives and other
+ambiguous formats.
 
-```dotenv
-NUNU_BASE_URL=http://localhost:3000
-```
+Run `nunu-cli upload --help` for all upload options.
 
-Plain HTTP is accepted only for localhost. Credentials are stored in the
-operating-system credential store, with a user-permission-only file fallback
-for headless systems. Project JSON files are not used for credentials.
+## CI with an API key
 
-## MCP proxy
-
-`nunu-cli mcp` exposes the Nunu remote MCP as a local stdio MCP server. It
-uses the same saved OAuth session or API-key environment variable as the upload
-command, and refreshes OAuth access tokens while the process is running.
-
-Authenticate before starting the server:
+CI should use an API key instead of browser login. Add the CLI to your project
+so the version is pinned in your lockfile:
 
 ```bash
-nunu-cli auth login
-nunu-cli mcp
+npm install --save-dev @nunu-ai/nunu-cli
 ```
 
-Configure an MCP host to launch the installed binary:
+Store these values in your CI provider's secrets or variables:
 
-```json
-{
-  "mcpServers": {
-    "nunu": {
-      "command": "nunu-cli",
-      "args": ["mcp"]
-    }
-  }
-}
+- `NUNU_API_KEY`: a Nunu API key
+- `NUNU_PROJECT_ID`: the project receiving the build
+
+Then upload with the local package:
+
+```bash
+npx nunu-cli upload "build/*.apk" --name "CI build"
 ```
 
-Or launch it directly through npm:
+GitHub Actions example:
+
+```yaml
+- uses: actions/checkout@v4
+- uses: actions/setup-node@v4
+  with:
+    node-version: 20
+    cache: npm
+- run: npm ci
+- name: Upload build to Nunu
+  env:
+    NUNU_API_KEY: ${{ secrets.NUNU_API_KEY }}
+    NUNU_PROJECT_ID: ${{ vars.NUNU_PROJECT_ID }}
+  run: npx nunu-cli upload "build/*.apk" --name "Build ${{ github.run_number }}"
+```
+
+Do not pass API keys as command-line arguments or commit them to `.env` files.
+
+## MCP server
+
+Log in once, then configure your MCP client to start the local stdio server:
 
 ```json
 {
   "mcpServers": {
     "nunu": {
       "command": "npx",
-      "args": ["--yes", "@nunu-ai/nunu-cli@0.1.20", "mcp"]
+      "args": ["--yes", "@nunu-ai/nunu-cli", "mcp"]
     }
   }
 }
 ```
 
-For non-interactive use, set `NUNU_API_KEY` in the MCP server environment.
-`NUNU_BASE_URL` selects another Nunu deployment and still derives its `/mcp`
-endpoint. The command writes only MCP protocol messages to stdout; diagnostics
-and logs go to stderr.
+For non-interactive use, set `NUNU_API_KEY` in the MCP server environment. Use
+`NUNU_WORKSPACE_ROOT` when file access should be rooted somewhere other than the
+client's working directory.
 
-The local server adds an `upload_build` tool and overrides a remote tool with
-the same name. It accepts one local file path, a display name, the target
-project ID, an optional platform, and optional tags. The platform is inferred
-for common build formats; archives and other ambiguous formats require it
-explicitly. By default, files are limited to the MCP process working directory
-after resolving symlinks. Set `--workspace-root /absolute/path/to/project` or
-`NUNU_WORKSPACE_ROOT` when the MCP host does not launch the server from the
-project directory (for example, a packaged Claude Desktop extension). The
-`path` argument may be absolute or relative to that workspace root. Upload
-metadata records `mcp` as the method automatically; this is not a model-
-provided tool argument.
+## Configuration
 
-## Automatic Metadata Collection
+- `NUNU_API_KEY`: API key for CI or other non-interactive use
+- `NUNU_PROJECT_ID`: default project ID
+- `NUNU_BASE_URL`: Nunu deployment URL; defaults to `https://nunu.ai`
+- `NUNU_WORKSPACE_ROOT`: allowed workspace root for local MCP file uploads
 
-The CLI automatically detects and collects metadata from your environment:
-
-**Git information** (via git commands):
-- Commit hash, branch, author, message
-- PR number and details (when available)
-- Repository URL and provider (GitHub, GitLab, etc.)
-
-**CI/CD information** (via environment variables):
-- Automatically detects: GitHub Actions, GitLab CI, Jenkins, CircleCI, Travis CI, Azure Pipelines, Bitrise
-- Collects: Build number, workflow name, run URL, triggered by, runner info
-
-**Build information**:
-- Timestamp, uploader, CLI version
-
-Metadata is collected automatically when:
-- Running inside a git repository (for VCS info)
-- Running in a CI/CD environment (for CI info)
-
-No additional configuration required.
-
-## CI/CD Integration
-
-### GitHub Actions
-```yaml
-- name: Upload build
-  env:
-    NUNU_API_KEY: ${{ secrets.NUNU_API_KEY }}
-    NUNU_PROJECT_ID: ${{ vars.NUNU_PROJECT_ID }}
-  run: nunu-cli upload "build/app-*.apk" --name "Build ${{ github.run_number }}"
-```
-
-For convenience in GitHub Actions, use our [GitHub Action](https://github.com/nunu-ai/upload-build-action) which wraps the CLI.
-
-### Other CI/CD Systems
-
-The CLI automatically detects and collects metadata from:
-- GitLab CI
-- Jenkins
-- CircleCI
-- Travis CI
-- Azure Pipelines
-- Bitrise
-
-Works with any CI/CD system. See [documentation](https://docs.nunu.ai) for examples.
-
-## Features
-
-- ✅ Automatic platform detection from file extension
-- ✅ File pattern matching with glob patterns
-- ✅ Large file support (multipart uploads for files >3GB)
-- ✅ Parallel uploads for speed
-- ✅ Automatic metadata collection from git and CI/CD environments
-- ✅ Smart storage management with auto-delete
-- ✅ Progress tracking and graceful cancellation
-
-## Documentation
-
-Full documentation available at [docs.nunu.ai](https://docs.nunu.ai) (requires authentication).
-
-- Configuration options and best practices
-- CI/CD integration examples
-- API reference for advanced usage
-- Troubleshooting guide
-
-## Support
-
-Contact us through nunu.ai for support and questions.
+The CLI also loads values from a local `.env` file.
