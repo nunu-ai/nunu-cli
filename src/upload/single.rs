@@ -32,7 +32,7 @@ pub async fn upload_single_part(
 
     info!("Uploading {} ({:.2} MB)", filename, file_size / 1024 / 1024);
 
-    let client = Client::new(config.clone());
+    let client = Client::new(config.clone())?;
 
     let upload_response = client
         .request_upload_url(

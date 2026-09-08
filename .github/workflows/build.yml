@@ -154,6 +154,12 @@ jobs:
             fi
           done
 
+      - name: Upload normalized release binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-binaries-normalized
+          path: artifacts
+
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
@@ -166,3 +172,52 @@ jobs:
             artifacts/nunu-cli-windows-*.exe
             artifacts/nunu-cli-macos-*
           generate_release_notes: true
+
+  publish-npm:
+    if: github.ref == 'refs/heads/main' && needs.release.outputs.released == 'true'
+    runs-on: [self-hosted, nix, Linux]
+    needs: [release, create-github-release]
+    permissions:
+      contents: "read"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v${{ needs.release.outputs.version }}
+
+      - name: Download normalized release binaries
+        uses: actions/download-artifact@v4
+        with:
+          name: release-binaries-normalized
+          path: artifacts
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: https://registry.npmjs.org
+
+      - name: Verify npm credentials
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -z "$NPM_TOKEN" ]; then
+            echo "NPM_TOKEN is required to publish @nunu-ai/nunu-cli packages."
+            exit 1
+          fi
+
+      - name: Prepare npm packages
+        run: node npm/prepare-release.mjs "${{ needs.release.outputs.version }}" artifacts npm/dist
+
+      - name: Publish platform packages
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          npm publish npm/dist/platforms/linux-x64 --access public
+          npm publish npm/dist/platforms/darwin-x64 --access public
+          npm publish npm/dist/platforms/darwin-arm64 --access public
+          npm publish npm/dist/platforms/win32-x64 --access public
+
+      - name: Publish launcher package
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish npm/dist --access public

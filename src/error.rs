@@ -17,6 +17,14 @@ pub enum Error {
     #[error("Invalid configuration: {0}")]
     ConfigError(String),
 
+    #[error("Authentication failed: {0}")]
+    AuthError(String),
+
+    #[error(
+        "Authentication failed: the OAuth session is no longer valid; run 'nunu-cli auth login' again"
+    )]
+    AuthSessionExpired,
+
     #[error("Upload failed: {0}")]
     UploadError(String),
 }

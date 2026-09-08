@@ -1,0 +1,15 @@
+{
+  "name": "@nunu-ai/nunu-cli-darwin-x64",
+  "version": "0.1.20",
+  "description": "Nunu CLI native binary for macOS x64",
+  "license": "MIT OR Apache-2.0",
+  "os": [
+    "darwin"
+  ],
+  "cpu": [
+    "x64"
+  ],
+  "files": [
+    "bin"
+  ]
+}

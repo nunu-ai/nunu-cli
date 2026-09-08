@@ -203,8 +203,12 @@ pub struct CompleteRequest {
 }
 
 impl Client {
-    #[must_use]
-    pub fn new(config: Config) -> Self {
+    /// Creates an API client using native and bundled CA roots.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the TLS provider or HTTP client cannot be initialized.
+    pub fn new(config: Config) -> Result<Self> {
         // Check for proxy configuration
         if let Ok(proxy) = std::env::var("HTTPS_PROXY").or_else(|_| std::env::var("https_proxy")) {
             info!("Using proxy: {}", Self::redact_proxy_url(&proxy));
@@ -216,10 +220,8 @@ impl Client {
             debug!("No proxy configured (direct connection)");
         }
 
-        Self {
-            http: HttpClient::new(), // reqwest automatically uses proxy
-            config,
-        }
+        let http = crate::tls::http_client_builder()?.build()?;
+        Ok(Self { config, http })
     }
 
     /// Redact sensitive information from proxy URLs
@@ -277,11 +279,9 @@ impl Client {
         debug!("Upload request: {request:?}");
 
         let response = self
-            .http
-            .post(&url)
-            .header("x-api-key", self.config.token.clone())
-            .json(&request)
-            .send()
+            .config
+            .credential
+            .send_authenticated(self.http.post(&url).json(&request))
             .await?;
 
         info!("Received response with status: {response:?}");
@@ -510,11 +510,9 @@ impl Client {
         };
 
         let response = self
-            .http
-            .post(&url)
-            .header("x-api-key", self.config.token.clone())
-            .json(&request)
-            .send()
+            .config
+            .credential
+            .send_authenticated(self.http.post(&url).json(&request))
             .await?;
 
         if !response.status().is_success() {
@@ -568,11 +566,9 @@ impl Client {
         debug!("Upload request: {request:?}");
 
         let response = self
-            .http
-            .post(&url)
-            .header("x-api-key", self.config.token.clone())
-            .json(&request)
-            .send()
+            .config
+            .credential
+            .send_authenticated(self.http.post(&url).json(&request))
             .await?;
 
         if !response.status().is_success() {
@@ -695,11 +691,9 @@ impl Client {
         };
 
         let response = self
-            .http
-            .post(&url)
-            .header("x-api-key", self.config.token.clone())
-            .json(&request)
-            .send()
+            .config
+            .credential
+            .send_authenticated(self.http.post(&url).json(&request))
             .await?;
 
         if !response.status().is_success() {
@@ -739,11 +733,9 @@ impl Client {
         }
 
         let response = self
-            .http
-            .delete(&url)
-            .header("x-api-key", self.config.token.clone())
-            .query(&query_params)
-            .send()
+            .config
+            .credential
+            .send_authenticated(self.http.delete(&url).query(&query_params))
             .await?;
 
         if !response.status().is_success() {

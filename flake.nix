@@ -38,6 +38,14 @@
       let
         pkgs = nixpkgs.legacyPackages.${system};
 
+        windowsPkgs = import nixpkgs {
+          localSystem = system;
+          crossSystem = {
+            config = "x86_64-w64-mingw32";
+            libc = "msvcrt";
+          };
+        };
+
         toolchain =
           with fenix.packages.${system};
           combine (
@@ -45,11 +53,11 @@
               default.toolchain
               stable.rust-src
             ]
-            ++ lib.optionals pkgs.stdenv.isLinux [
+            ++ lib.optionals pkgs.stdenv.hostPlatform.isLinux [
               targets.x86_64-pc-windows-gnu.latest.rust-std
               targets.x86_64-unknown-linux-musl.latest.rust-std
             ]
-            ++ lib.optionals (pkgs.stdenv.isDarwin && pkgs.stdenv.hostPlatform.isAarch64) [
+            ++ lib.optionals (pkgs.stdenv.hostPlatform.isDarwin && pkgs.stdenv.hostPlatform.isAarch64) [
               targets.x86_64-apple-darwin.latest.rust-std
             ]
           );
@@ -57,6 +65,7 @@
         inherit (pkgs) lib;
 
         craneLib = (crane.mkLib pkgs).overrideToolchain toolchain;
+        windowsCraneLib = (crane.mkLib windowsPkgs).overrideToolchain (_: toolchain);
         src = craneLib.cleanCargoSource ./.;
 
         # Common arguments can be set here to avoid repeating them later
@@ -67,7 +76,7 @@
 
           buildInputs =
             [ ]
-            ++ lib.optionals pkgs.stdenv.isDarwin [
+            ++ lib.optionals pkgs.stdenv.hostPlatform.isDarwin [
               pkgs.libiconv
             ];
         };
@@ -75,6 +84,12 @@
         # Build *just* the cargo dependencies, so we can reuse
         # all of that work (e.g. via cachix) when running in CI
         cargoArtifacts = craneLib.buildDepsOnly commonArgs;
+
+        windowsArgs = commonArgs // {
+          CARGO_BUILD_TARGET = "x86_64-pc-windows-gnu";
+        };
+
+        windowsCargoArtifacts = windowsCraneLib.buildDepsOnly windowsArgs;
 
         # Regular build (for local development and Darwin)
         nunu-cli = craneLib.buildPackage (
@@ -85,7 +100,7 @@
         );
 
         # macOS x86_64 build (Darwin only - cross-compilation from ARM64)
-        nunu-cli-macos-x86_64 = lib.optionalAttrs (pkgs.stdenv.isDarwin && pkgs.stdenv.hostPlatform.isAarch64) (
+        nunu-cli-macos-x86_64 = lib.optionalAttrs (pkgs.stdenv.hostPlatform.isDarwin && pkgs.stdenv.hostPlatform.isAarch64) (
           craneLib.buildPackage (
             commonArgs
             // {
@@ -96,7 +111,7 @@
         );
 
         # Static Linux build (Linux only - for releases)
-        nunu-cli-linux-musl = lib.optionalAttrs pkgs.stdenv.isLinux (
+        nunu-cli-linux-musl = lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux (
           craneLib.buildPackage (
             commonArgs
             // {
@@ -108,25 +123,11 @@
         );
 
         # Windows build (Linux only - cross-compilation)
-        nunu-cli-windows = lib.optionalAttrs pkgs.stdenv.isLinux (
-          craneLib.buildPackage (
-            commonArgs
+        nunu-cli-windows = lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux (
+          windowsCraneLib.buildPackage (
+            windowsArgs
             // {
-              inherit cargoArtifacts;
-              CARGO_BUILD_TARGET = "x86_64-pc-windows-gnu";
-
-              # fixes issues related to libring
-              TARGET_CC = "${pkgs.pkgsCross.mingwW64.stdenv.cc}/bin/${pkgs.pkgsCross.mingwW64.stdenv.cc.targetPrefix}cc";
-
-              # fixes issues related to openssl
-              OPENSSL_DIR = "${pkgs.openssl.dev}";
-              OPENSSL_LIB_DIR = "${pkgs.openssl.out}/lib";
-              OPENSSL_INCLUDE_DIR = "${pkgs.openssl.dev}/include/";
-
-              depsBuildBuild = with pkgs; [
-                pkgsCross.mingwW64.stdenv.cc
-                pkgsCross.mingwW64.windows.pthreads
-              ];
+              cargoArtifacts = windowsCargoArtifacts;
             }
           )
         );
@@ -207,7 +208,7 @@
 
             # Platform-specific release artifacts
             release-artifacts =
-              if pkgs.stdenv.isLinux then
+              if pkgs.stdenv.hostPlatform.isLinux then
                 # On Linux: build static Linux binary + Windows binary
                 pkgs.stdenv.mkDerivation {
                   name = "nunu-cli-release";
@@ -269,12 +270,12 @@
                 };
           }
           // scripts
-          // lib.optionalAttrs pkgs.stdenv.isLinux {
+          // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
             # These packages only available on Linux
             linux-musl = nunu-cli-linux-musl;
             windows = nunu-cli-windows;
           }
-          // lib.optionalAttrs (pkgs.stdenv.isDarwin && pkgs.stdenv.hostPlatform.isAarch64) {
+          // lib.optionalAttrs (pkgs.stdenv.hostPlatform.isDarwin && pkgs.stdenv.hostPlatform.isAarch64) {
             # Cross-compilation from ARM64 to x86_64 macOS
             macos-x86_64 = nunu-cli-macos-x86_64;
           };
