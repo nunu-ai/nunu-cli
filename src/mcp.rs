@@ -257,6 +257,24 @@ struct ProxyServer {
     tools: Arc<Vec<Tool>>,
 }
 
+#[cfg(unix)]
+async fn termination_signal() -> Result<()> {
+    use tokio::signal::unix::{SignalKind, signal};
+
+    let mut terminate = signal(SignalKind::terminate()).context("failed to listen for SIGTERM")?;
+    tokio::select! {
+        result = tokio::signal::ctrl_c() => result.context("failed to listen for SIGINT"),
+        signal = terminate.recv() => signal.context("SIGTERM listener stopped unexpectedly"),
+    }
+}
+
+#[cfg(not(unix))]
+async fn termination_signal() -> Result<()> {
+    tokio::signal::ctrl_c()
+        .await
+        .context("failed to listen for a termination signal")
+}
+
 impl ServerHandler for ProxyServer {
     fn get_info(&self) -> ServerInfo {
         ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
@@ -330,9 +348,16 @@ pub async fn serve_stdio(mcp_url: &str, credential: CredentialProvider) -> Resul
         .serve(rmcp::transport::stdio())
         .await
         .context("failed to start the stdio MCP server")?;
-    let downstream_result = downstream.waiting().await;
+
+    let completion = tokio::select! {
+        result = downstream.waiting() => Ok(Some(result)),
+        signal_result = termination_signal() => signal_result.map(|()| None),
+    };
     let _ = upstream.close().await;
-    downstream_result.context("stdio MCP server task failed")?;
+    let downstream_result = completion?;
+    if let Some(result) = downstream_result {
+        result.context("stdio MCP server task failed")?;
+    }
     Ok(())
 }
 
