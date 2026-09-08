@@ -212,12 +212,12 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
-          nix develop --command npm publish npm/dist/platforms/linux-x64 --access public
-          nix develop --command npm publish npm/dist/platforms/darwin-x64 --access public
-          nix develop --command npm publish npm/dist/platforms/darwin-arm64 --access public
-          nix develop --command npm publish npm/dist/platforms/win32-x64 --access public
+          nix develop --command npm publish ./npm/dist/platforms/linux-x64 --access public
+          nix develop --command npm publish ./npm/dist/platforms/darwin-x64 --access public
+          nix develop --command npm publish ./npm/dist/platforms/darwin-arm64 --access public
+          nix develop --command npm publish ./npm/dist/platforms/win32-x64 --access public
 
       - name: Publish launcher package
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: nix develop --command npm publish npm/dist --access public
+        run: nix develop --command npm publish ./npm/dist --access public
