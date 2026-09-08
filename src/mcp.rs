@@ -340,6 +340,7 @@ pub async fn serve_stdio(
     credential: CredentialProvider,
     workspace_root: Option<&Path>,
 ) -> Result<()> {
+    credential.validate_mcp_destination(mcp_url)?;
     let allowed_root = resolve_allowed_root(workspace_root).await?;
     let upload_config = Config::with_credential(credential.clone(), api_url, None)?;
     let local_tools = Arc::new(LocalToolRegistry::standard(upload_config, allowed_root));

@@ -146,6 +146,10 @@ impl CredentialStorage {
     ///
     /// Returns an error when neither storage backend can persist the credential.
     pub fn save(&self, credential: &StoredCredential) -> Result<bool> {
+        self.lock_refresh()?.save(credential)
+    }
+
+    fn save_unlocked(&self, credential: &StoredCredential) -> Result<bool> {
         self.ensure_directory()?;
         let serialized = serde_json::to_string(credential)?;
 
@@ -164,21 +168,33 @@ impl CredentialStorage {
     ///
     /// # Errors
     ///
-    /// Returns an error if permission-restricted credential files cannot be
-    /// removed. Missing credentials are not an error.
+    /// Returns an error if the credential store or credential files cannot be
+    /// cleared. Missing credentials are not an error.
     pub fn delete(&self) -> Result<()> {
-        if self.use_keyring
-            && let Ok(entry) = keyring::Entry::new(KEYRING_SERVICE, KEYRING_USER)
-        {
-            let _ = entry.delete_credential();
-        }
+        self.lock_refresh()?.delete()
+    }
 
+    fn delete_unlocked(&self) -> Result<()> {
+        let result = if self.use_keyring {
+            keyring::Entry::new(KEYRING_SERVICE, KEYRING_USER)
+                .and_then(|entry| entry.delete_credential())
+        } else {
+            Ok(())
+        };
+        self.finish_deletion(result)
+    }
+
+    fn finish_deletion(
+        &self,
+        keyring_result: std::result::Result<(), keyring::Error>,
+    ) -> Result<()> {
+        check_keyring_deletion(keyring_result)?;
         remove_if_exists(&self.credentials_path())?;
         remove_if_exists(&self.metadata_path())?;
         Ok(())
     }
 
-    /// Acquire the cross-process credential refresh lock.
+    /// Acquire the cross-process lock shared by all credential mutations.
     ///
     /// # Errors
     ///
@@ -194,7 +210,10 @@ impl CredentialStorage {
         file.lock_exclusive().map_err(|error| {
             Error::AuthError(format!("Failed to lock OAuth credentials: {error}"))
         })?;
-        Ok(CredentialRefreshLock { file })
+        Ok(CredentialRefreshLock {
+            file,
+            storage: self.clone(),
+        })
     }
 
     fn ensure_directory(&self) -> Result<()> {
@@ -288,6 +307,26 @@ impl CredentialStorage {
 
 pub struct CredentialRefreshLock {
     file: File,
+    storage: CredentialStorage,
+}
+
+impl CredentialRefreshLock {
+    pub(crate) fn save(&self, credential: &StoredCredential) -> Result<bool> {
+        self.storage.save_unlocked(credential)
+    }
+
+    pub(crate) fn delete(&self) -> Result<()> {
+        self.storage.delete_unlocked()
+    }
+}
+
+fn check_keyring_deletion(result: std::result::Result<(), keyring::Error>) -> Result<()> {
+    match result {
+        Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+        Err(error) => Err(Error::AuthError(format!(
+            "Could not delete credentials from the operating-system credential store: {error}"
+        ))),
+    }
 }
 
 impl Drop for CredentialRefreshLock {
@@ -387,6 +426,43 @@ fn validate_file_permissions(_path: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn keyring_deletion_only_accepts_success_or_missing_entry() {
+        assert!(check_keyring_deletion(Ok(())).is_ok());
+        assert!(check_keyring_deletion(Err(keyring::Error::NoEntry)).is_ok());
+        assert!(check_keyring_deletion(Err(keyring::Error::NoDefaultStore)).is_err());
+        assert!(
+            check_keyring_deletion(Err(keyring::Error::NotSupportedByStore(
+                "locked".to_string()
+            )))
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn failed_keyring_deletion_preserves_metadata_and_file_credentials() {
+        let directory = tempfile::tempdir().expect("directory");
+        let storage = CredentialStorage::file_only(directory.path().to_path_buf());
+        storage
+            .save(&StoredCredential::ApiKey {
+                api_key: "saved-key".to_string(),
+            })
+            .expect("save");
+        assert!(
+            storage
+                .finish_deletion(Err(keyring::Error::NoDefaultStore))
+                .is_err()
+        );
+        assert!(storage.metadata_path().exists());
+        assert!(
+            matches!(storage.load().expect("load"), Some(StoredCredential::ApiKey { api_key }) if api_key == "saved-key")
+        );
+        storage
+            .finish_deletion(Err(keyring::Error::NoEntry))
+            .expect("missing keyring entry is harmless");
+        assert!(storage.load().expect("load after logout").is_none());
+    }
 
     #[test]
     fn file_fallback_round_trip_and_delete() {

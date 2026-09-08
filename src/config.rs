@@ -30,6 +30,7 @@ impl Config {
         project_id: Option<String>,
     ) -> Result<Self> {
         let api_url = validate_api_url(api_url)?;
+        credential.validate_api_destination(&api_url)?;
         if let Some(project_id) = project_id.as_deref()
             && (project_id.is_empty()
                 || !project_id.chars().all(|character| {

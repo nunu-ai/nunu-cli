@@ -53,6 +53,7 @@ pub fn save_api_key(storage: &CredentialStorage, api_key: String) -> Result<bool
 pub async fn validate_mcp_credential(mcp_url: &str, credential: StoredCredential) -> Result<()> {
     let url = oauth::parse_secure_url(mcp_url, "MCP URL")?;
     let provider = CredentialProvider::from_credential(credential, None)?;
+    provider.validate_mcp_destination(mcp_url)?;
     let request = serde_json::json!({
         "jsonrpc": "2.0",
         "id": 1,

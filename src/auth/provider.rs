@@ -35,6 +35,7 @@ pub struct CredentialProvider {
     state: Arc<Mutex<StoredCredential>>,
     storage: Option<CredentialStorage>,
     http: reqwest::Client,
+    oauth_resource: Option<String>,
 }
 
 impl std::fmt::Debug for CredentialProvider {
@@ -43,6 +44,7 @@ impl std::fmt::Debug for CredentialProvider {
             .debug_struct("CredentialProvider")
             .field("state", &"[REDACTED]")
             .field("storage", &self.storage)
+            .field("oauth_resource", &self.oauth_resource)
             .field("http", &"reqwest::Client")
             .finish()
     }
@@ -63,6 +65,7 @@ impl CredentialProvider {
         Ok(Self {
             state: Arc::new(Mutex::new(StoredCredential::ApiKey { api_key })),
             storage: None,
+            oauth_resource: None,
             http: oauth_http_client()?,
         })
     }
@@ -78,11 +81,7 @@ impl CredentialProvider {
                 "No credentials found. Run 'nunu-cli auth login' or set NUNU_API_KEY.".to_string(),
             )
         })?;
-        Ok(Self {
-            state: Arc::new(Mutex::new(credential)),
-            storage: Some(storage),
-            http: oauth_http_client()?,
-        })
+        Self::from_credential(credential, Some(storage))
     }
 
     /// Create a provider around an already loaded credential.
@@ -95,10 +94,52 @@ impl CredentialProvider {
         storage: Option<CredentialStorage>,
     ) -> Result<Self> {
         Ok(Self {
+            oauth_resource: match &credential {
+                StoredCredential::OAuth(oauth) => Some(oauth.mcp_url.clone()),
+                StoredCredential::ApiKey { .. } => None,
+            },
             state: Arc::new(Mutex::new(credential)),
             storage,
             http: oauth_http_client()?,
         })
+    }
+
+    /// Check that saved OAuth credentials belong to this exact MCP resource.
+    ///
+    /// # Errors
+    /// Returns an error for invalid URLs or a different deployment/resource.
+    pub fn validate_mcp_destination(&self, mcp_url: &str) -> Result<()> {
+        if let Some(resource) = &self.oauth_resource {
+            let saved = crate::auth::oauth::parse_secure_url(resource, "Saved MCP resource")?;
+            let destination = crate::auth::oauth::parse_secure_url(mcp_url, "MCP destination")?;
+            if saved != destination {
+                return Err(Error::AuthError(
+                    "Saved OAuth credentials belong to a different MCP resource. Log in to the selected deployment.".to_string(),
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    /// Check that uploads target the API of the saved OAuth deployment.
+    ///
+    /// # Errors
+    /// Returns an error when the API does not belong to the saved deployment.
+    pub fn validate_api_destination(&self, api_url: &str) -> Result<()> {
+        if self.oauth_resource.is_some() {
+            let mut destination = crate::auth::oauth::parse_secure_url(api_url, "API destination")?;
+            if destination.path().trim_end_matches('/') != "/api"
+                || destination.query().is_some()
+                || destination.fragment().is_some()
+            {
+                return Err(Error::AuthError(
+                    "OAuth uploads require the deployment's /api endpoint".to_string(),
+                ));
+            }
+            destination.set_path("/mcp");
+            self.validate_mcp_destination(destination.as_str())?;
+        }
+        Ok(())
     }
 
     /// Resolve the current request header, refreshing OAuth credentials first
@@ -197,7 +238,7 @@ impl CredentialProvider {
         };
 
         let lock_storage = storage.clone();
-        let _refresh_lock = tokio::task::spawn_blocking(move || lock_storage.lock_refresh())
+        let refresh_lock = tokio::task::spawn_blocking(move || lock_storage.lock_refresh())
             .await
             .map_err(|error| {
                 Error::AuthError(format!("OAuth refresh lock task failed: {error}"))
@@ -205,30 +246,26 @@ impl CredentialProvider {
 
         // Another process may have rotated the refresh token while this process
         // was waiting for the lock. Re-read the credential before refreshing.
-        if let Some(latest) = storage.load()? {
-            match &latest {
-                StoredCredential::OAuth(credential)
-                    if rejected_access_token
-                        .is_some_and(|rejected| credential.access_token != rejected) =>
-                {
-                    *state = latest;
-                    return Ok(());
-                }
-                StoredCredential::OAuth(credential)
-                    if rejected_access_token.is_none()
-                        && credential.expires_at
-                            > unix_timestamp().saturating_add(REFRESH_EARLY_SECONDS) =>
-                {
-                    *state = latest;
-                    return Ok(());
-                }
-                StoredCredential::ApiKey { .. } => {
-                    *state = latest;
-                    return Ok(());
-                }
-                StoredCredential::OAuth(_) => {
-                    *state = latest;
-                }
+        let latest = storage.load()?.ok_or(Error::AuthSessionExpired)?;
+        // A later login must never switch a running provider to another deployment
+        // or authentication method.
+        match (&*state, &latest) {
+            (StoredCredential::OAuth(current), StoredCredential::OAuth(latest))
+                if current.client_id == latest.client_id
+                    && current.token_endpoint == latest.token_endpoint =>
+            {
+                self.validate_mcp_destination(&latest.mcp_url)?;
+            }
+            _ => return Err(Error::AuthSessionExpired),
+        }
+        if let StoredCredential::OAuth(credential) = &latest {
+            let already_refreshed = rejected_access_token.map_or_else(
+                || credential.expires_at > unix_timestamp().saturating_add(REFRESH_EARLY_SECONDS),
+                |rejected| credential.access_token != rejected,
+            );
+            *state = latest;
+            if already_refreshed {
+                return Ok(());
             }
         }
 
@@ -238,7 +275,7 @@ impl CredentialProvider {
         let refreshed = match refresh_oauth_credential(&self.http, credential).await {
             Ok(refreshed) => refreshed,
             Err(Error::AuthSessionExpired) => {
-                storage.delete()?;
+                refresh_lock.delete()?;
                 return Err(Error::AuthSessionExpired);
             }
             Err(error) => {
@@ -248,7 +285,7 @@ impl CredentialProvider {
             }
         };
         let updated = StoredCredential::OAuth(refreshed);
-        storage.save(&updated)?;
+        refresh_lock.save(&updated)?;
         *state = updated;
         Ok(())
     }
@@ -260,6 +297,166 @@ mod tests {
     use std::path::PathBuf;
     use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
     use tokio::net::{TcpListener, TcpStream};
+
+    fn oauth_credential() -> StoredCredential {
+        StoredCredential::OAuth(crate::auth::StoredOAuthCredential {
+            client_id: "test-client".to_string(),
+            token_endpoint: "http://127.0.0.1:1/token".to_string(),
+            mcp_url: "https://nunu.ai/mcp".to_string(),
+            access_token: "old-access".to_string(),
+            refresh_token: "old-refresh".to_string(),
+            expires_at: 0,
+            scope: None,
+        })
+    }
+
+    #[test]
+    fn oauth_destinations_are_bound_to_the_saved_resource() {
+        let provider =
+            CredentialProvider::from_credential(oauth_credential(), None).expect("provider");
+        assert!(
+            provider
+                .validate_mcp_destination("https://NUNU.ai:443/mcp")
+                .is_ok()
+        );
+        assert!(
+            provider
+                .validate_api_destination("https://nunu.ai/api/")
+                .is_ok()
+        );
+        for destination in [
+            "https://other.example/mcp",
+            "https://nunu.ai:8443/mcp",
+            "http://localhost/mcp",
+            "https://nunu.ai/other",
+            "https://nunu.ai/mcp?other",
+            "https://nunu.ai/mcp#other",
+        ] {
+            assert!(
+                provider.validate_mcp_destination(destination).is_err(),
+                "{destination}"
+            );
+        }
+        for destination in [
+            "https://other.example/api",
+            "https://nunu.ai:8443/api",
+            "https://nunu.ai/other",
+        ] {
+            assert!(
+                crate::config::Config::with_credential(provider.clone(), destination, None)
+                    .is_err()
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn logout_prevents_proactive_and_unauthorized_refresh() {
+        let directory = tempfile::tempdir().expect("directory");
+        let storage = CredentialStorage::file_only(directory.path().to_path_buf());
+        storage.save(&oauth_credential()).expect("save");
+        let provider = CredentialProvider::load(storage.clone()).expect("provider");
+        storage.delete().expect("logout");
+        assert!(matches!(
+            provider.header().await,
+            Err(Error::AuthSessionExpired)
+        ));
+        assert!(matches!(
+            provider.refresh_after_unauthorized("old-access").await,
+            Err(Error::AuthSessionExpired)
+        ));
+        assert!(storage.load().expect("load").is_none());
+    }
+
+    #[tokio::test]
+    async fn refresh_rejects_a_login_to_another_deployment() {
+        let directory = tempfile::tempdir().expect("directory");
+        let storage = CredentialStorage::file_only(directory.path().to_path_buf());
+        storage.save(&oauth_credential()).expect("save");
+        let provider = CredentialProvider::load(storage.clone()).expect("provider");
+        let StoredCredential::OAuth(mut replacement) = oauth_credential() else {
+            unreachable!()
+        };
+        replacement.mcp_url = "https://other.example/mcp".to_string();
+        replacement.access_token = "other-access".to_string();
+        replacement.expires_at = unix_timestamp() + 3600;
+        storage
+            .save(&StoredCredential::OAuth(replacement))
+            .expect("new login");
+        assert!(provider.header().await.is_err());
+        assert!(
+            provider
+                .refresh_after_unauthorized("old-access")
+                .await
+                .is_err()
+        );
+        assert!(
+            matches!(storage.load().expect("load"), Some(StoredCredential::OAuth(oauth)) if oauth.access_token == "other-access")
+        );
+    }
+
+    #[tokio::test]
+    async fn logout_and_login_wait_for_in_flight_refresh() {
+        for logout in [true, false] {
+            let listener = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
+                .await
+                .expect("listener");
+            let address = listener.local_addr().expect("address");
+            let directory = tempfile::tempdir().expect("directory");
+            let storage = CredentialStorage::file_only(directory.path().to_path_buf());
+            let StoredCredential::OAuth(mut credential) = oauth_credential() else {
+                unreachable!()
+            };
+            credential.token_endpoint = format!("http://{address}/token");
+            storage
+                .save(&StoredCredential::OAuth(credential))
+                .expect("save");
+            let provider = CredentialProvider::load(storage.clone()).expect("provider");
+            let refresh = tokio::spawn(async move { provider.header().await });
+            let (mut stream, _) =
+                tokio::time::timeout(std::time::Duration::from_secs(5), listener.accept())
+                    .await
+                    .expect("refresh started")
+                    .expect("accept");
+            read_request(&mut stream).await;
+            let mutation_storage = storage.clone();
+            let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+            let mut mutation = tokio::task::spawn_blocking(move || {
+                started_tx.send(()).expect("signal mutation");
+                if logout {
+                    mutation_storage.delete()
+                } else {
+                    mutation_storage
+                        .save(&StoredCredential::ApiKey {
+                            api_key: "new-login".to_string(),
+                        })
+                        .map(|_| ())
+                }
+            });
+            started_rx.await.expect("mutation started");
+            assert!(
+                tokio::time::timeout(std::time::Duration::from_millis(100), &mut mutation)
+                    .await
+                    .is_err()
+            );
+            write_response(&mut stream, "200 OK", r#"{"access_token":"new-access","refresh_token":"new-refresh","token_type":"Bearer","expires_in":3600}"#).await;
+            refresh
+                .await
+                .expect("refresh task")
+                .expect("refresh succeeded");
+            mutation
+                .await
+                .expect("mutation task")
+                .expect("mutation succeeded");
+            let saved = storage.load().expect("load");
+            if logout {
+                assert!(saved.is_none());
+            } else {
+                assert!(
+                    matches!(saved, Some(StoredCredential::ApiKey { api_key }) if api_key == "new-login")
+                );
+            }
+        }
+    }
 
     async fn read_request(stream: &mut TcpStream) -> String {
         let mut request = Vec::new();
