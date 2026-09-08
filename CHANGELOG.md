@@ -1,8 +1,15 @@
 # Changelog
 
-## [v0.1.22](https://github.com/nunu-ai/nunu-cli/compare/v0.1.21...a6518947ad05f6c106cd29ec60e2159e9d74fba8) (2026-09-08)
+## [v0.1.23](https://github.com/nunu-ai/nunu-cli/compare/v0.1.22...6527978add9c789d92d4edf8b2893c08d575d826) (2026-09-08)
 
 ### Fixes
+
+* launcher publish
+([6527978](https://github.com/nunu-ai/nunu-cli/commit/6527978add9c789d92d4edf8b2893c08d575d826))
+
+### [v0.1.22](https://github.com/nunu-ai/nunu-cli/compare/v0.1.21...v0.1.22) (2026-09-08)
+
+#### Fixes
 
 * link oauth to base url
 ([a651894](https://github.com/nunu-ai/nunu-cli/commit/a6518947ad05f6c106cd29ec60e2159e9d74fba8))
