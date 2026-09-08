@@ -175,7 +175,16 @@ impl CredentialStorage {
     }
 
     fn delete_unlocked(&self) -> Result<()> {
-        let result = if self.use_keyring {
+        // The metadata identifies the active backend. Do not probe the OS
+        // keyring when the credential was saved to the file
+        let backend = self.read_metadata()?;
+        let result = if self.use_keyring
+            && !matches!(
+                backend,
+                Some(StorageMetadata {
+                    backend: StorageBackend::File
+                })
+            ) {
             keyring::Entry::new(KEYRING_SERVICE, KEYRING_USER)
                 .and_then(|entry| entry.delete_credential())
         } else {
@@ -477,6 +486,29 @@ mod tests {
             storage.load().expect("load credential"),
             Some(StoredCredential::ApiKey { api_key }) if api_key == "nunu_test_secret"
         ));
+
+        storage.delete().expect("delete credential");
+        assert!(storage.load().expect("load deleted credential").is_none());
+    }
+
+    #[test]
+    fn file_backend_deletion_does_not_require_an_os_keyring() {
+        let temporary_directory = tempfile::tempdir().expect("create temp directory");
+        let storage = CredentialStorage {
+            directory: temporary_directory.path().join("nunu"),
+            use_keyring: true,
+        };
+        // Force the active backend to the file fallback so this test remains
+        // independent of whether the test host has a configured keyring.
+        storage.ensure_directory().expect("directory");
+        storage
+            .write_metadata(StorageBackend::File)
+            .expect("metadata");
+        atomic_write(
+            &storage.credentials_path(),
+            br#"{"type":"api_key","api_key":"saved-key"}"#,
+        )
+        .expect("credentials");
 
         storage.delete().expect("delete credential");
         assert!(storage.load().expect("load deleted credential").is_none());
