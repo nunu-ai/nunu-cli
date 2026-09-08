@@ -66,7 +66,11 @@
 
         craneLib = (crane.mkLib pkgs).overrideToolchain toolchain;
         windowsCraneLib = (crane.mkLib windowsPkgs).overrideToolchain (_: toolchain);
-        src = craneLib.cleanCargoSource ./.;
+        src = lib.cleanSourceWith {
+          src = lib.cleanSource ./.;
+          # Keep the HTML template embedded by include_str! during compilation.
+          filter = path: type: craneLib.filterCargoSources path type || lib.hasSuffix ".html" path;
+        };
 
         # Common arguments can be set here to avoid repeating them later
         commonArgs = {
