@@ -23,6 +23,7 @@ use sse_stream::Sse;
 use std::{collections::HashMap, sync::Arc};
 
 const API_KEY_HEADER: &str = "x-api-key";
+const UPSTREAM_TRANSPORT_ERROR_MESSAGE: &str = "nexus could not complete this tool call.";
 
 #[derive(Clone, Debug)]
 struct AuthenticatedHttpClient {
@@ -306,9 +307,9 @@ impl ServerHandler for ProxyServer {
         match self.upstream.call_tool_once(request).await {
             Ok(response) => Ok(response),
             Err(ServiceError::McpError(error)) => Err(error),
-            Err(error) => Ok(CallToolResult::error(vec![ContentBlock::text(format!(
-                "The Nunu service could not complete this tool call: {error}"
-            ))])
+            Err(_) => Ok(CallToolResult::error(vec![ContentBlock::text(
+                UPSTREAM_TRANSPORT_ERROR_MESSAGE,
+            )])
             .into()),
         }
     }
@@ -457,10 +458,21 @@ mod tests {
         let text = result.content[0].as_text().expect("text content");
         assert_eq!(text.text, "remote:echo");
 
+        remote_server.close().await.expect("close remote server");
+        let response = host
+            .call_tool_once(CallToolRequestParams::new("echo"))
+            .await
+            .expect("receive sanitized upstream transport error");
+        let CallToolResponse::Complete(result) = response else {
+            panic!("expected a complete error response");
+        };
+        assert_eq!(result.is_error, Some(true));
+        let text = result.content[0].as_text().expect("text content");
+        assert_eq!(text.text, UPSTREAM_TRANSPORT_ERROR_MESSAGE);
+
         host.close().await.expect("close host");
         proxy_server.close().await.expect("close proxy");
         upstream.close().await.expect("close upstream");
-        remote_server.close().await.expect("close remote server");
     }
 
     #[test]
