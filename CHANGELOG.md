@@ -1,8 +1,15 @@
 # Changelog
 
-## [v0.1.24](https://github.com/nunu-ai/nunu-cli/compare/v0.1.23...04e43c965efaaa60f59826021e5cd3c6a332ab1f) (2026-09-08)
+## [v0.1.25](https://github.com/nunu-ai/nunu-cli/compare/v0.1.24...8e4fd25ef26d3a8a1fcb99da314bc185c8724509) (2026-09-08)
 
 ### Fixes
+
+* local logout
+([8e4fd25](https://github.com/nunu-ai/nunu-cli/commit/8e4fd25ef26d3a8a1fcb99da314bc185c8724509))
+
+### [v0.1.24](https://github.com/nunu-ai/nunu-cli/compare/v0.1.23...v0.1.24) (2026-09-08)
+
+#### Fixes
 
 * show target-aware login instructions
 ([04e43c9](https://github.com/nunu-ai/nunu-cli/commit/04e43c965efaaa60f59826021e5cd3c6a332ab1f))
