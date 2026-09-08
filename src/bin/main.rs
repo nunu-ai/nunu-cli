@@ -60,6 +60,10 @@ enum Commands {
         /// API key for authentication
         #[arg(long, env = "NUNU_API_KEY", conflicts_with = "token", hide = true)]
         api_key: Option<String>,
+
+        /// Project ID used by local tools such as `upload_build`
+        #[arg(long, env = "NUNU_PROJECT_ID")]
+        project_id: Option<String>,
     },
 
     /// Upload a build artifact
@@ -289,14 +293,19 @@ async fn main() -> Result<()> {
     }
 
     let result: Result<String> = match cli.command {
-        Commands::Mcp { token, api_key } => {
+        Commands::Mcp {
+            token,
+            api_key,
+            project_id,
+        } => {
             let credential = if let Some(api_key) = api_key.or(token) {
                 CredentialProvider::api_key(api_key)?
             } else {
                 CredentialProvider::load(CredentialStorage::discover()?)?
             };
             let mcp_url = endpoint_url(&cli.base_url, "mcp")?;
-            serve_stdio(&mcp_url, credential).await?;
+            let api_url = endpoint_url(&cli.base_url, "api")?;
+            serve_stdio(&mcp_url, &api_url, project_id, credential).await?;
             Ok(String::new())
         }
         Commands::Upload {

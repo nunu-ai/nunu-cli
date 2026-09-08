@@ -190,6 +190,15 @@ For non-interactive use, set `NUNU_API_KEY` in the MCP server environment.
 endpoint. The command writes only MCP protocol messages to stdout; diagnostics
 and logs go to stderr.
 
+The local server adds an `upload_build` tool and overrides a remote tool with
+the same name. It accepts one local file path, a display name, an optional
+platform, and optional tags. The platform is inferred for common build formats;
+archives and other ambiguous formats require it explicitly. Files are limited
+to the MCP process working directory after resolving symlinks. Set
+`NUNU_PROJECT_ID` (or pass `nunu-cli mcp --project-id ...`) when the credential
+requires explicit project scope. Upload metadata records `mcp` as the method
+automatically; this is not a model-provided tool argument.
+
 ## Automatic Metadata Collection
 
 The CLI automatically detects and collects metadata from your environment:

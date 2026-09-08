@@ -1,4 +1,9 @@
-use crate::auth::{AuthHeader, CredentialProvider};
+mod tools;
+
+use crate::{
+    auth::{AuthHeader, CredentialProvider},
+    config::Config,
+};
 use anyhow::{Context as _, Result};
 use futures::stream::BoxStream;
 use http::{HeaderName, HeaderValue};
@@ -21,6 +26,7 @@ use rmcp::{
 };
 use sse_stream::Sse;
 use std::{collections::HashMap, sync::Arc};
+use tools::LocalToolRegistry;
 
 const API_KEY_HEADER: &str = "x-api-key";
 const UPSTREAM_TRANSPORT_ERROR_MESSAGE: &str = "nexus could not complete this tool call.";
@@ -255,6 +261,7 @@ impl StreamableHttpClient for AuthenticatedHttpClient {
 struct ProxyServer {
     upstream: Peer<RoleClient>,
     tools: Arc<Vec<Tool>>,
+    local_tools: Arc<LocalToolRegistry>,
 }
 
 #[cfg(unix)]
@@ -303,6 +310,9 @@ impl ServerHandler for ProxyServer {
         request: CallToolRequestParams,
         _context: RequestContext<rmcp::RoleServer>,
     ) -> std::result::Result<CallToolResponse, rmcp::ErrorData> {
+        if let Some(result) = self.local_tools.call(&request).await {
+            return result;
+        }
         match self.upstream.call_tool_once(request).await {
             Ok(response) => Ok(response),
             Err(ServiceError::McpError(error)) => Err(error),
@@ -320,7 +330,17 @@ impl ServerHandler for ProxyServer {
 ///
 /// Returns an error if authentication, the upstream MCP connection, tool
 /// discovery, or either MCP transport fails.
-pub async fn serve_stdio(mcp_url: &str, credential: CredentialProvider) -> Result<()> {
+pub async fn serve_stdio(
+    mcp_url: &str,
+    api_url: &str,
+    project_id: Option<String>,
+    credential: CredentialProvider,
+) -> Result<()> {
+    let allowed_root = tokio::fs::canonicalize(std::env::current_dir()?)
+        .await
+        .context("failed to resolve the MCP server working directory")?;
+    let upload_config = Config::with_credential(credential.clone(), api_url, project_id)?;
+    let local_tools = Arc::new(LocalToolRegistry::standard(upload_config, allowed_root));
     let client = AuthenticatedHttpClient::new(credential)?;
     let transport = StreamableHttpClientTransport::with_client(
         client,
@@ -334,15 +354,16 @@ pub async fn serve_stdio(mcp_url: &str, credential: CredentialProvider) -> Resul
         .serve(transport)
         .await
         .context("failed to connect to the Nunu MCP")?;
-    let mut tools = upstream
+    let remote_tools = upstream
         .list_all_tools()
         .await
         .context("failed to list Nunu MCP tools")?;
-    tools.sort_by(|left, right| left.name.cmp(&right.name));
+    let tools = local_tools.merged_with(remote_tools);
 
     let proxy = ProxyServer {
         upstream: upstream.peer().clone(),
         tools: Arc::new(tools),
+        local_tools,
     };
     let downstream = proxy
         .serve(rmcp::transport::stdio())
@@ -365,6 +386,7 @@ pub async fn serve_stdio(mcp_url: &str, credential: CredentialProvider) -> Resul
 mod tests {
     use super::*;
 
+    const UPLOAD_BUILD_TOOL: &str = "upload_build";
     #[derive(Clone)]
     struct EchoServer;
 
@@ -384,11 +406,10 @@ mod tests {
                 "type".to_string(),
                 serde_json::Value::String("object".to_string()),
             );
-            std::future::ready(Ok(ListToolsResult::with_all_items(vec![Tool::new(
-                "echo",
-                "Echo a remote response",
-                schema,
-            )])))
+            std::future::ready(Ok(ListToolsResult::with_all_items(vec![
+                Tool::new("echo", "Echo a remote response", schema.clone()),
+                Tool::new(UPLOAD_BUILD_TOOL, "Remote upload placeholder", schema),
+            ])))
         }
 
         async fn call_tool(
@@ -424,9 +445,18 @@ mod tests {
             .list_all_tools()
             .await
             .expect("list upstream tools");
+        let root = tempfile::tempdir().expect("create allowed root");
+        let config = Config::new("secret".to_string(), "http://localhost:3000/api")
+            .expect("create upload config");
+        let local_tools = Arc::new(LocalToolRegistry::standard(
+            config,
+            root.path().canonicalize().expect("canonicalize root"),
+        ));
+        let tools = local_tools.merged_with(tools);
         let proxy = ProxyServer {
             upstream: upstream.peer().clone(),
             tools: Arc::new(tools),
+            local_tools,
         };
 
         let (host_io, proxy_io) = tokio::io::duplex(64 * 1024);
@@ -444,8 +474,13 @@ mod tests {
         let mut host = host.expect("connect host client");
 
         let proxied_tools = host.list_all_tools().await.expect("list proxied tools");
-        assert_eq!(proxied_tools.len(), 1);
+        assert_eq!(proxied_tools.len(), 2);
         assert_eq!(proxied_tools[0].name, "echo");
+        assert_eq!(proxied_tools[1].name, UPLOAD_BUILD_TOOL);
+        assert_ne!(
+            proxied_tools[1].description.as_deref(),
+            Some("Remote upload placeholder")
+        );
 
         let response = host
             .call_tool_once(CallToolRequestParams::new("echo"))
@@ -456,6 +491,14 @@ mod tests {
         };
         let text = result.content[0].as_text().expect("text content");
         assert_eq!(text.text, "remote:echo");
+
+        let local_error = host
+            .call_tool_once(CallToolRequestParams::new(UPLOAD_BUILD_TOOL))
+            .await;
+        assert!(
+            local_error.is_err(),
+            "local handler must reject missing input"
+        );
 
         remote_server.close().await.expect("close remote server");
         let response = host
