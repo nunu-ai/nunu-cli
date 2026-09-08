@@ -153,17 +153,17 @@ pub async fn login_with_oauth(options: &OAuthLoginOptions) -> Result<StoredCrede
         }
     }
 
-    eprintln!("Authorize Nunu in your browser:");
+    eprintln!("authorize nunu in your browser:");
     eprintln!("{authorization_url}");
     if options.open_browser && !is_remote_shell() {
         match open::that_detached(authorization_url.as_str()) {
-            Ok(()) => eprintln!("Opened the authorization page. Waiting for approval..."),
+            Ok(()) => eprintln!("opened the authorization page. waiting for approval..."),
             Err(error) => eprintln!(
-                "Could not open a browser ({error}). Open the URL above manually on this machine."
+                "could not open a browser ({error}). open the url above manually on this machine."
             ),
         }
     } else {
-        eprintln!("Open the URL above in a browser on this machine. Waiting for approval...");
+        eprintln!("open the url above in a browser on this machine. waiting for approval...");
     }
 
     let callback = tokio::time::timeout(LOGIN_TIMEOUT, receive_callback(listener, &state))
@@ -245,7 +245,7 @@ async fn register_client(
     redirect_uri: &str,
 ) -> Result<String> {
     let request = DynamicRegistrationRequest {
-        client_name: "Nunu CLI",
+        client_name: "nunu cli",
         redirect_uris: vec![redirect_uri.to_string()],
         grant_types: vec!["authorization_code", "refresh_token"],
         response_types: vec!["code"],
@@ -437,29 +437,14 @@ async fn receive_callback(
         match read_callback_request(&mut stream).await {
             Ok(callback) => {
                 if let Err(error) = verify_state(expected_state, &callback.state) {
-                    write_browser_response(
-                        &mut stream,
-                        "400 Bad Request",
-                        "Nunu CLI could not complete authentication. Return to the terminal for details.",
-                    )
-                    .await?;
+                    write_browser_response(&mut stream, "400 Bad Request").await?;
                     return Err(error);
                 }
-                write_browser_response(
-                    &mut stream,
-                    "200 OK",
-                    "Nunu CLI is authenticated. You can close this window.",
-                )
-                .await?;
+                write_browser_response(&mut stream, "200 OK").await?;
                 return Ok(callback);
             }
             Err(error) => {
-                write_browser_response(
-                    &mut stream,
-                    "400 Bad Request",
-                    "Nunu CLI could not complete authentication. Return to the terminal for details.",
-                )
-                .await?;
+                write_browser_response(&mut stream, "400 Bad Request").await?;
                 return Err(error);
             }
         }
@@ -544,11 +529,18 @@ async fn read_callback_request(stream: &mut TcpStream) -> Result<AuthorizationCa
     })
 }
 
-async fn write_browser_response(stream: &mut TcpStream, status: &str, message: &str) -> Result<()> {
-    let body = format!(
-        "<!doctype html><html><head><meta charset=\"utf-8\"><title>Nunu CLI</title></head>\
-         <body><main><h1>{message}</h1></main></body></html>"
-    );
+async fn write_browser_response(stream: &mut TcpStream, status: &str) -> Result<()> {
+    // The callback arrives before token exchange, so acknowledge authorization
+    // without claiming credentials have already been saved.
+    let (state, title, symbol) = if status == "200 OK" {
+        ("success", "APPROVED", "M6 12l4 4 8-8")
+    } else {
+        ("error", "SIGN-IN FAILED", "M12 7v6m0 4h.01")
+    };
+    let body = include_str!("browser-response.html")
+        .replace("{{state}}", state)
+        .replace("{{title}}", title)
+        .replace("{{symbol}}", symbol);
     let response = format!(
         "HTTP/1.1 {status}\r\nContent-Type: text/html; charset=utf-8\r\n\
          Content-Length: {}\r\nConnection: close\r\nCache-Control: no-store\r\n\r\n{body}",
