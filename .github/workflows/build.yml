@@ -193,7 +193,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           registry-url: https://registry.npmjs.org
 
       - name: Verify npm credentials
@@ -206,18 +206,18 @@ jobs:
           fi
 
       - name: Prepare npm packages
-        run: node npm/prepare-release.mjs "${{ needs.release.outputs.version }}" artifacts npm/dist
+        run: nix develop --command node npm/prepare-release.mjs "${{ needs.release.outputs.version }}" artifacts npm/dist
 
       - name: Publish platform packages
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
-          npm publish npm/dist/platforms/linux-x64 --access public
-          npm publish npm/dist/platforms/darwin-x64 --access public
-          npm publish npm/dist/platforms/darwin-arm64 --access public
-          npm publish npm/dist/platforms/win32-x64 --access public
+          nix develop --command npm publish npm/dist/platforms/linux-x64 --access public
+          nix develop --command npm publish npm/dist/platforms/darwin-x64 --access public
+          nix develop --command npm publish npm/dist/platforms/darwin-arm64 --access public
+          nix develop --command npm publish npm/dist/platforms/win32-x64 --access public
 
       - name: Publish launcher package
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: npm publish npm/dist --access public
+        run: nix develop --command npm publish npm/dist --access public

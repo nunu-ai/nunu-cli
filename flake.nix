@@ -294,6 +294,7 @@
             pre-commit
             cargo-release
             convco
+            nodejs_24
           ];
 
           shellHook = ''
