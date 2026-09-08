@@ -1,13 +1,41 @@
 # Changelog
 
-## [v0.1.20](https://github.com/nunu-ai/nunu-cli/compare/v0.1.19...33ed773b2f4e20289f5ae705278ff9c27785fc6a) (2026-05-28)
+## [v0.1.21](https://github.com/nunu-ai/nunu-cli/compare/v0.1.20...b87937110a8f666c45705355f337bb3a8b766682) (2026-09-08)
 
 ### Features
+
+* update readme
+([7ce513f](https://github.com/nunu-ai/nunu-cli/commit/7ce513f91a992978a6bc846a5b9bf9b613ef3426))
+* npm release
+([1c79584](https://github.com/nunu-ai/nunu-cli/commit/1c79584234cae11a0e676797bb2d249e0e0fa26f))
+* workspace override
+([2db4dee](https://github.com/nunu-ai/nunu-cli/commit/2db4deed27244be7788bcc502d4c21b0028cc7ca))
+* build upload tool
+([b2ee464](https://github.com/nunu-ai/nunu-cli/commit/b2ee4640d3e0b0cd37f76da81e43b223e8fbbf31))
+* basic rmcp proxy
+([4cf7ef5](https://github.com/nunu-ai/nunu-cli/commit/4cf7ef501518421f9ee177764c7175234954bf25))
+* oauth support
+([3ebe4ce](https://github.com/nunu-ai/nunu-cli/commit/3ebe4ce9b182d3cb6a66cb108bdea34c6624207d))
+
+### Fixes
+
+* windows build
+([c4aa48a](https://github.com/nunu-ai/nunu-cli/commit/c4aa48a08cca561f2da0d02d4638cfb340bc2f08))
+* cert fallback
+([1f723d4](https://github.com/nunu-ai/nunu-cli/commit/1f723d434b322972c8eed510653476ee8415a4f0))
+* upstream error handling
+([b1c89ee](https://github.com/nunu-ai/nunu-cli/commit/b1c89eeda7e0186f6bb605f8e686d739b12751df))
+* mcp lifecycle
+([8a253bc](https://github.com/nunu-ai/nunu-cli/commit/8a253bc2dda0d20b9e311cda11c29e3c6efe3b10))
+
+### [v0.1.20](https://github.com/nunu-ai/nunu-cli/compare/v0.1.19...v0.1.20) (2026-05-28)
+
+#### Features
 
 * remove project_id and use public v1 api
 ([96b24fc](https://github.com/nunu-ai/nunu-cli/commit/96b24fc149c20d6a7aa6b2daa9a87c31b60a5f0b))
 
-### Fixes
+#### Fixes
 
 * trailing comma
 ([92342eb](https://github.com/nunu-ai/nunu-cli/commit/92342ebf494622733dce0b3342f627a7fc4d7021))
