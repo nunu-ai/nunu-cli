@@ -1,0 +1,27 @@
+{
+  "name": "@nunu-ai/nunu-cli",
+  "version": "0.1.20",
+  "description": "CLI and local MCP server for Nunu.ai",
+  "homepage": "https://nunu.ai",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/nunu-ai/nunu-cli.git"
+  },
+  "license": "MIT OR Apache-2.0",
+  "type": "module",
+  "engines": {
+    "node": ">=18"
+  },
+  "bin": {
+    "nunu-cli": "bin/nunu-cli.js"
+  },
+  "files": [
+    "bin"
+  ],
+  "optionalDependencies": {
+    "@nunu-ai/nunu-cli-linux-x64": "0.1.20",
+    "@nunu-ai/nunu-cli-darwin-x64": "0.1.20",
+    "@nunu-ai/nunu-cli-darwin-arm64": "0.1.20",
+    "@nunu-ai/nunu-cli-win32-x64": "0.1.20"
+  }
+}

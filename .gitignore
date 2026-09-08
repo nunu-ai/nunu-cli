@@ -20,6 +20,9 @@ target/
 result*
 .direnv
 
+# npm release staging
+npm/dist/
+
 # nunu
 logs
 .config.json

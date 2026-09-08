@@ -56,6 +56,19 @@ sudo mv nunu-cli-macos-${ARCH} /usr/local/bin/nunu-cli
 
 **Specific version:** Visit the [releases page](https://github.com/nunu-ai/nunu-cli/releases), select your version, and download `nunu-cli-windows-x86_64.exe`.
 
+### npm / npx
+
+The CLI and local MCP server can also be run without a system-wide install:
+
+```bash
+npx --yes @nunu-ai/nunu-cli@0.1.20 --version
+npx --yes @nunu-ai/nunu-cli@0.1.20 auth login
+```
+
+Pin the version in MCP host configuration for reproducible behavior. The npm
+launcher installs only the native binary for the current operating system and
+CPU architecture.
+
 ## Quick Start
 ```bash
 # Interactive browser login (recommended for local development)
@@ -180,6 +193,19 @@ Configure an MCP host to launch the installed binary:
     "nunu": {
       "command": "nunu-cli",
       "args": ["mcp"]
+    }
+  }
+}
+```
+
+Or launch it directly through npm:
+
+```json
+{
+  "mcpServers": {
+    "nunu": {
+      "command": "npx",
+      "args": ["--yes", "@nunu-ai/nunu-cli@0.1.20", "mcp"]
     }
   }
 }
