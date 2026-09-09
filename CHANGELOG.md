@@ -1,13 +1,20 @@
 # Changelog
 
-## [v0.1.26](https://github.com/nunu-ai/nunu-cli/compare/v0.1.25...df5b3849b3d366daf19c1733c2f68d566c96da32) (2026-09-08)
+## [v0.1.27](https://github.com/nunu-ai/nunu-cli/compare/v0.1.26...be5c0050e8fe0da3bde8a73e24c535389a622524) (2026-09-09)
 
 ### Features
+
+* tool to await run/testplan/job completion
+([be5c005](https://github.com/nunu-ai/nunu-cli/commit/be5c0050e8fe0da3bde8a73e24c535389a622524))
+
+### [v0.1.26](https://github.com/nunu-ai/nunu-cli/compare/v0.1.25...v0.1.26) (2026-09-08)
+
+#### Features
 
 * nice oauth page
 ([808afd7](https://github.com/nunu-ai/nunu-cli/commit/808afd764ed39a16c4298878dcab1942182e2d93))
 
-### Fixes
+#### Fixes
 
 * build
 ([df5b384](https://github.com/nunu-ai/nunu-cli/commit/df5b3849b3d366daf19c1733c2f68d566c96da32))
