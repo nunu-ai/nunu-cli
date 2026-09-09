@@ -4,6 +4,8 @@ use crate::{ci_metadata::CiMetadata, metadata::VcsMetadata};
 use log::{debug, info};
 use reqwest::Client as HttpClient;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use url::Url;
 
 #[derive(Clone)]
 pub struct Client {
@@ -222,6 +224,74 @@ impl Client {
 
         let http = crate::tls::http_client_builder()?.build()?;
         Ok(Self { config, http })
+    }
+
+    /// Get the current status and details for a job in the configured project.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the project is not configured, the request fails, or
+    /// the API returns a non-success response.
+    pub async fn get_job(&self, job_id: &str) -> Result<Value> {
+        self.get_project_resource("jobs", job_id).await
+    }
+
+    /// Get the current status and details for a run in the configured project.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the project is not configured, the request fails, or
+    /// the API returns a non-success response.
+    pub async fn get_run(&self, run_id: &str) -> Result<Value> {
+        self.get_project_resource("runs", run_id).await
+    }
+
+    /// Get the current status and details for a test plan execution in the configured project.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the project is not configured, the request fails, or
+    /// the API returns a non-success response.
+    pub async fn get_test_plan_execution(&self, execution_id: &str) -> Result<Value> {
+        self.get_project_resource("test-plan-executions", execution_id)
+            .await
+    }
+
+    async fn get_project_resource(&self, resource: &str, resource_id: &str) -> Result<Value> {
+        let url = self.project_resource_url(resource, resource_id)?;
+        debug!("Fetching resource status from: {url}");
+
+        let response = self
+            .config
+            .credential
+            .send_authenticated(self.http.get(url.clone()))
+            .await?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            return Err(Error::ApiError(format!(
+                "GET {url} failed - Status {status}: {body}"
+            )));
+        }
+
+        Ok(response.json().await?)
+    }
+
+    fn project_resource_url(&self, resource: &str, resource_id: &str) -> Result<Url> {
+        let project_id = self.config.project_id.as_deref().ok_or_else(|| {
+            Error::ConfigError("A project ID is required for this API request".to_string())
+        })?;
+        let mut url = Url::parse(&self.config.api_url)
+            .map_err(|error| Error::ConfigError(format!("Invalid API URL: {error}")))?;
+        url.path_segments_mut()
+            .map_err(|()| Error::ConfigError("API URL cannot be a base URL".to_string()))?
+            .push("v1")
+            .push("project")
+            .push(project_id)
+            .push(resource)
+            .push(resource_id);
+        Ok(url)
     }
 
     /// Redact sensitive information from proxy URLs

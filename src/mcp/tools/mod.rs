@@ -1,4 +1,5 @@
 mod upload_build;
+mod wait_for;
 
 use crate::config::Config;
 use async_trait::async_trait;
@@ -28,8 +29,11 @@ pub(super) struct LocalToolRegistry {
 impl LocalToolRegistry {
     pub(super) fn standard(config: Config, allowed_root: PathBuf) -> Self {
         Self::new([
-            Arc::new(upload_build::UploadBuildTool::new(config, allowed_root))
-                as Arc<dyn LocalTool>,
+            Arc::new(upload_build::UploadBuildTool::new(
+                config.clone(),
+                allowed_root,
+            )) as Arc<dyn LocalTool>,
+            Arc::new(wait_for::WaitForTool::new(config)) as Arc<dyn LocalTool>,
         ])
     }
 
