@@ -1,8 +1,20 @@
 # Changelog
 
-## [v0.1.28](https://github.com/nunu-ai/nunu-cli/compare/v0.1.27...180de5a4a0c63f895aaad6c029fec9b68f2b4222) (2026-09-10)
+## [v0.1.29](https://github.com/nunu-ai/nunu-cli/compare/v0.1.28...27e71cbea74f192a6301fac6162d71623a13a823) (2026-09-10)
+
+### Features
+
+* artifact download tool
+([6296463](https://github.com/nunu-ai/nunu-cli/commit/629646370899144599e47be839eafef9ba7b1fc6))
 
 ### Fixes
+
+* download schema
+([27e71cb](https://github.com/nunu-ai/nunu-cli/commit/27e71cbea74f192a6301fac6162d71623a13a823))
+
+### [v0.1.28](https://github.com/nunu-ai/nunu-cli/compare/v0.1.27...v0.1.28) (2026-09-10)
+
+#### Fixes
 
 * mac build deps
 ([180de5a](https://github.com/nunu-ai/nunu-cli/commit/180de5a4a0c63f895aaad6c029fec9b68f2b4222))
