@@ -1,8 +1,15 @@
 # Changelog
 
-## [v0.1.27](https://github.com/nunu-ai/nunu-cli/compare/v0.1.26...be5c0050e8fe0da3bde8a73e24c535389a622524) (2026-09-09)
+## [v0.1.28](https://github.com/nunu-ai/nunu-cli/compare/v0.1.27...180de5a4a0c63f895aaad6c029fec9b68f2b4222) (2026-09-10)
 
-### Features
+### Fixes
+
+* mac build deps
+([180de5a](https://github.com/nunu-ai/nunu-cli/commit/180de5a4a0c63f895aaad6c029fec9b68f2b4222))
+
+### [v0.1.27](https://github.com/nunu-ai/nunu-cli/compare/v0.1.26...v0.1.27) (2026-09-09)
+
+#### Features
 
 * tool to await run/testplan/job completion
 ([be5c005](https://github.com/nunu-ai/nunu-cli/commit/be5c0050e8fe0da3bde8a73e24c535389a622524))
