@@ -440,6 +440,7 @@ mod tests {
     use super::*;
 
     const UPLOAD_BUILD_TOOL: &str = "upload_build";
+    const DOWNLOAD_RUN_FILES_TOOL: &str = "download_run_files";
     const WAIT_FOR_COMPLETION_TOOL: &str = "wait_for_completion";
     #[derive(Clone)]
     struct EchoServer;
@@ -528,12 +529,13 @@ mod tests {
         let mut host = host.expect("connect host client");
 
         let proxied_tools = host.list_all_tools().await.expect("list proxied tools");
-        assert_eq!(proxied_tools.len(), 3);
-        assert_eq!(proxied_tools[0].name, "echo");
-        assert_eq!(proxied_tools[1].name, UPLOAD_BUILD_TOOL);
-        assert_eq!(proxied_tools[2].name, WAIT_FOR_COMPLETION_TOOL);
+        assert_eq!(proxied_tools.len(), 4);
+        assert_eq!(proxied_tools[0].name, DOWNLOAD_RUN_FILES_TOOL);
+        assert_eq!(proxied_tools[1].name, "echo");
+        assert_eq!(proxied_tools[2].name, UPLOAD_BUILD_TOOL);
+        assert_eq!(proxied_tools[3].name, WAIT_FOR_COMPLETION_TOOL);
         assert_ne!(
-            proxied_tools[1].description.as_deref(),
+            proxied_tools[2].description.as_deref(),
             Some("Remote upload placeholder")
         );
 

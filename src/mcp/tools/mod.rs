@@ -1,3 +1,4 @@
+mod download_run_files;
 mod upload_build;
 mod wait_for;
 
@@ -29,6 +30,10 @@ pub(super) struct LocalToolRegistry {
 impl LocalToolRegistry {
     pub(super) fn standard(config: Config, allowed_root: PathBuf) -> Self {
         Self::new([
+            Arc::new(download_run_files::DownloadRunFilesTool::new(
+                config.clone(),
+                allowed_root.clone(),
+            )) as Arc<dyn LocalTool>,
             Arc::new(upload_build::UploadBuildTool::new(
                 config.clone(),
                 allowed_root,

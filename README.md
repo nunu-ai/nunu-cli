@@ -116,6 +116,6 @@ client's working directory.
 - `NUNU_API_KEY`: API key for CI or other non-interactive use
 - `NUNU_PROJECT_ID`: default project ID
 - `NUNU_BASE_URL`: Nunu deployment URL; defaults to `https://nunu.ai`
-- `NUNU_WORKSPACE_ROOT`: allowed workspace root for local MCP file uploads
+- `NUNU_WORKSPACE_ROOT`: allowed workspace root for local MCP file uploads and run artifact downloads
 
 The CLI also loads values from a local `.env` file.

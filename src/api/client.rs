@@ -5,12 +5,14 @@ use log::{debug, info};
 use reqwest::Client as HttpClient;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::path::Path;
 use url::Url;
 
 #[derive(Clone)]
 pub struct Client {
     config: Config,
     http: HttpClient,
+    download_http: HttpClient,
 }
 
 /// Build platform enum matching the backend schema
@@ -223,7 +225,14 @@ impl Client {
         }
 
         let http = crate::tls::http_client_builder()?.build()?;
-        Ok(Self { config, http })
+        let download_http = crate::tls::http_client_builder()?
+            .redirect(reqwest::redirect::Policy::none())
+            .build()?;
+        Ok(Self {
+            config,
+            http,
+            download_http,
+        })
     }
 
     /// Get the current status and details for a job in the configured project.
@@ -255,6 +264,69 @@ impl Client {
     pub async fn get_test_plan_execution(&self, execution_id: &str) -> Result<Value> {
         self.get_project_resource("test-plan-executions", execution_id)
             .await
+    }
+
+    /// Download an authenticated URL into a newly-created local file.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the URL is invalid, the destination already exists,
+    /// the request fails, or the response cannot be written completely.
+    pub async fn download_to_file(&self, url: &str, destination: &Path) -> Result<u64> {
+        use futures::StreamExt as _;
+        use tokio::io::AsyncWriteExt as _;
+
+        let url = Url::parse(url)
+            .map_err(|error| Error::ApiError(format!("Invalid artifact URL: {error}")))?;
+        let loopback_http = url.scheme() == "http"
+            && url.host_str().is_some_and(|host| {
+                host.eq_ignore_ascii_case("localhost")
+                    || host
+                        .parse::<std::net::IpAddr>()
+                        .is_ok_and(|address| address.is_loopback())
+            });
+        if url.scheme() != "https" && !loopback_http {
+            return Err(Error::ApiError(
+                "Artifact URL must use HTTPS (HTTP is allowed only for localhost)".to_string(),
+            ));
+        }
+
+        debug!("Downloading artifact from: {url}");
+        let response = self
+            .config
+            .credential
+            .send_authenticated(self.download_http.get(url.clone()))
+            .await?;
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            return Err(Error::ApiError(format!(
+                "GET {url} failed - Status {status}: {body}"
+            )));
+        }
+
+        let file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(destination)?;
+        let mut file = tokio::fs::File::from_std(file);
+        let transfer: Result<u64> = async {
+            let mut downloaded = 0_u64;
+            let mut stream = response.bytes_stream();
+            while let Some(chunk) = stream.next().await {
+                let chunk = chunk?;
+                file.write_all(&chunk).await?;
+                downloaded += chunk.len() as u64;
+            }
+            file.flush().await?;
+            Ok(downloaded)
+        }
+        .await;
+        drop(file);
+        if transfer.is_err() {
+            let _ = tokio::fs::remove_file(destination).await;
+        }
+        transfer
     }
 
     async fn get_project_resource(&self, resource: &str, resource_id: &str) -> Result<Value> {
