@@ -15,6 +15,13 @@ pub struct Client {
     download_http: HttpClient,
 }
 
+fn redact_artifact_url(url: &Url) -> String {
+    let mut redacted = url.clone();
+    redacted.set_query(None);
+    redacted.set_fragment(None);
+    redacted.to_string()
+}
+
 /// Build platform enum matching the backend schema
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -291,7 +298,8 @@ impl Client {
             ));
         }
 
-        debug!("Downloading artifact from: {url}");
+        let redacted_url = redact_artifact_url(&url);
+        debug!("Downloading artifact from: {redacted_url}");
         let response = self
             .config
             .credential
@@ -301,7 +309,7 @@ impl Client {
             let status = response.status();
             let body = response.text().await.unwrap_or_default();
             return Err(Error::ApiError(format!(
-                "GET {url} failed - Status {status}: {body}"
+                "GET {redacted_url} failed - Status {status}: {body}"
             )));
         }
 
@@ -890,5 +898,24 @@ impl Client {
 
         info!("Upload aborted successfully");
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::redact_artifact_url;
+    use url::Url;
+
+    #[test]
+    fn redacts_artifact_url_credentials() {
+        let url = Url::parse(
+            "https://storage.example.test/artifacts/build.zip?X-Amz-Signature=secret#fragment",
+        )
+        .expect("valid URL");
+
+        assert_eq!(
+            redact_artifact_url(&url),
+            "https://storage.example.test/artifacts/build.zip"
+        );
     }
 }

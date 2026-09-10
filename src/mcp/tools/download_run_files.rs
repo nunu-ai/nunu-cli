@@ -8,7 +8,7 @@ use rmcp::{
 };
 use serde::Deserialize;
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     fs,
     path::{Component, Path, PathBuf},
     sync::Arc,
@@ -26,7 +26,8 @@ pub(super) struct DownloadRunFilesTool {
 struct DownloadRunFilesInput {
     project_id: String,
     run_id: String,
-    path: String,
+    #[serde(alias = "path")]
+    destination_dir: String,
     files: Option<Vec<RunFileSelector>>,
 }
 
@@ -35,6 +36,7 @@ struct DownloadRunFilesInput {
 struct RunFileSelector {
     run_id: String,
     file_ref: String,
+    relative_path: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -66,6 +68,8 @@ struct PlannedDownload {
     temporary: PathBuf,
 }
 
+type RequestedArtifacts = HashMap<(String, PathBuf), Option<PathBuf>>;
+
 impl DownloadRunFilesTool {
     pub(super) fn new(config: Config, allowed_root: PathBuf) -> Self {
         Self {
@@ -83,7 +87,7 @@ impl DownloadRunFilesTool {
             Some(input.project_id.trim().to_string()),
         )?;
         let client = Client::new(config)?;
-        let destination_root = self.prepare_destination(&input.path).await?;
+        let destination_root = self.prepare_destination(&input.destination_dir).await?;
         let run = client
             .get_run(input.run_id.trim())
             .await
@@ -212,23 +216,31 @@ impl DownloadRunFilesTool {
         &self,
         destination_root: &Path,
         run: RunDetails,
-        requested_artifacts: Option<&HashSet<(String, PathBuf)>>,
+        requested_artifacts: Option<&HashMap<(String, PathBuf), Option<PathBuf>>>,
     ) -> Result<Vec<PlannedDownload>> {
+        let use_player_directories = run.players.len() > 1;
         let mut selected_artifacts = Vec::new();
-        let mut missing_artifacts = requested_artifacts.cloned().unwrap_or_default();
+        let mut missing_artifacts: HashSet<(String, PathBuf)> = requested_artifacts
+            .map(|files| files.keys().cloned().collect())
+            .unwrap_or_default();
         for player in run.players {
             for artifact in player.artifacts {
                 let relative = safe_artifact_path(&artifact.filename)?;
                 let stable_ref = (player.id.clone(), relative.clone());
-                if requested_artifacts.is_some_and(|files| !files.contains(&stable_ref)) {
-                    continue;
-                }
+                let requested_relative_path = match requested_artifacts {
+                    Some(files) => match files.get(&stable_ref) {
+                        Some(relative_path) => relative_path.clone(),
+                        None => continue,
+                    },
+                    None => None,
+                };
                 missing_artifacts.remove(&stable_ref);
                 selected_artifacts.push((
                     player.player_number,
                     player.id.clone(),
                     artifact,
                     relative,
+                    requested_relative_path,
                 ));
             }
         }
@@ -246,12 +258,25 @@ impl DownloadRunFilesTool {
 
         let mut downloads = Vec::new();
         let mut destinations = HashSet::new();
-        for (player_number, composite_run_id, artifact, relative) in selected_artifacts {
-            let player_relative = PathBuf::from(format!("player-{player_number}")).join(relative);
-            let file_name = player_relative
+        for (
+            player_number,
+            composite_run_id,
+            artifact,
+            artifact_relative,
+            requested_relative_path,
+        ) in selected_artifacts
+        {
+            let output_relative = requested_relative_path.unwrap_or_else(|| {
+                if use_player_directories {
+                    PathBuf::from(format!("player-{player_number}")).join(&artifact_relative)
+                } else {
+                    artifact_relative.clone()
+                }
+            });
+            let file_name = output_relative
                 .file_name()
                 .context("artifact filename is empty")?;
-            let parent_relative = player_relative
+            let parent_relative = output_relative
                 .parent()
                 .context("artifact destination has no parent directory")?;
             let parent = prepare_child_directory(destination_root, parent_relative)
@@ -329,20 +354,21 @@ fn validate_input(input: &DownloadRunFilesInput) -> Result<()> {
         "project_id cannot be empty"
     );
     anyhow::ensure!(!input.run_id.trim().is_empty(), "run_id cannot be empty");
-    anyhow::ensure!(!input.path.trim().is_empty(), "path cannot be empty");
+    anyhow::ensure!(
+        !input.destination_dir.trim().is_empty(),
+        "destination_dir cannot be empty"
+    );
     if let Some(files) = &input.files {
         anyhow::ensure!(!files.is_empty(), "files cannot be empty");
     }
     Ok(())
 }
 
-fn requested_run_files(
-    input: &DownloadRunFilesInput,
-) -> Result<Option<HashSet<(String, PathBuf)>>> {
+fn requested_run_files(input: &DownloadRunFilesInput) -> Result<Option<RequestedArtifacts>> {
     let Some(files) = &input.files else {
         return Ok(None);
     };
-    let mut requested = HashSet::with_capacity(files.len());
+    let mut requested = HashMap::with_capacity(files.len());
     for file in files {
         let run_id = file.run_id.trim();
         anyhow::ensure!(!run_id.is_empty(), "files[].run_id cannot be empty");
@@ -354,8 +380,18 @@ fn requested_run_files(
         })?;
         let safe = safe_artifact_path(artifact_path)
             .with_context(|| format!("invalid file_ref '{}'", file.file_ref))?;
+        let relative_path = file
+            .relative_path
+            .as_deref()
+            .map(|path| {
+                safe_relative_file_path(path, "files[].relative_path")
+                    .with_context(|| format!("invalid relative_path for '{}'", file.file_ref))
+            })
+            .transpose()?;
         anyhow::ensure!(
-            requested.insert((run_id.to_string(), safe)),
+            requested
+                .insert((run_id.to_string(), safe), relative_path)
+                .is_none(),
             "files contains a duplicate selector: run_id '{run_id}', file_ref '{}'",
             file.file_ref
         );
@@ -364,23 +400,24 @@ fn requested_run_files(
 }
 
 fn safe_artifact_path(filename: &str) -> Result<PathBuf> {
-    anyhow::ensure!(!filename.is_empty(), "artifact filename cannot be empty");
+    safe_relative_file_path(filename, "artifact filename")
+}
+
+fn safe_relative_file_path(filename: &str, description: &str) -> Result<PathBuf> {
+    anyhow::ensure!(!filename.trim().is_empty(), "{description} cannot be empty");
     let path = Path::new(filename);
     anyhow::ensure!(
         !path.is_absolute(),
-        "artifact path cannot be absolute: '{filename}'"
+        "{description} cannot be absolute: '{filename}'"
     );
     let mut safe = PathBuf::new();
     for component in path.components() {
         match component {
             Component::Normal(component) => safe.push(component),
-            _ => anyhow::bail!("artifact path contains unsafe traversal: '{filename}'"),
+            _ => anyhow::bail!("{description} contains unsafe traversal: '{filename}'"),
         }
     }
-    anyhow::ensure!(
-        safe.file_name().is_some(),
-        "artifact filename cannot be empty"
-    );
+    anyhow::ensure!(safe.file_name().is_some(), "{description} cannot be empty");
     Ok(safe)
 }
 
@@ -573,7 +610,12 @@ fn definition() -> Tool {
             "path": {
                 "type": "string",
                 "minLength": 1,
-                "description": "Local destination directory, absolute or relative to the configured MCP workspace root. It is created when needed. Artifacts are stored below player-<number>/ directories. Existing files are never overwritten."
+                "description": "Deprecated alias for destination_dir."
+            },
+            "destination_dir": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Local destination directory, absolute or relative to the configured MCP workspace root. It is created when needed. If a selected file has no relative_path, single-player runs preserve the artifact path while multiplayer runs prefix it with player-<number>. Existing files are never overwritten."
             },
             "files": {
                 "type": "array",
@@ -591,16 +633,45 @@ fn definition() -> Tool {
                             "type": "string",
                             "pattern": "^artifact:.+",
                             "description": "Stable artifact:<path> file reference returned by inspect_run."
+                        },
+                        "relative_path": {
+                            "type": "string",
+                            "minLength": 1,
+                            "description": "Optional safe path relative to destination_dir for this file. When provided, it is used exactly and is not prefixed with a player directory."
                         }
                     },
                     "required": ["run_id", "file_ref"]
                 },
-                "description": "Optional stable run-file selectors returned by inspect_run. Omit this field to download every artifact in the run."
+                "description": "Optional stable run-file selectors returned by inspect_run. Omit this field to download every artifact in the run. Each selected file may provide a relative_path output override."
             }
         },
-        "required": ["project_id", "run_id", "path"]
+        "required": ["project_id", "run_id"],
+        "oneOf": [
+            { "required": ["destination_dir"] },
+            { "required": ["path"] }
+        ]
     });
-    let output_schema = serde_json::json!({
+    let output_schema = output_schema();
+    Tool::new(
+        NAME,
+        "Download selected artifact files, or all artifact files, from a Nunu run into the local workspace. Use destination_dir as the shared output root; selected files may provide relative_path overrides. Without overrides, single-player runs preserve artifact paths and multiplayer runs use player-<number>/ directories. Existing files are never overwritten.",
+        input_schema.as_object().cloned().unwrap_or_default(),
+    )
+    .with_title("Download Nunu run files")
+    .with_raw_output_schema(Arc::new(
+        output_schema.as_object().cloned().unwrap_or_default(),
+    ))
+    .with_annotations(
+        ToolAnnotations::new()
+            .read_only(false)
+            .destructive(false)
+            .idempotent(false)
+            .open_world(true),
+    )
+}
+
+fn output_schema() -> serde_json::Value {
+    serde_json::json!({
         "type": "object",
         "properties": {
             "status": { "type": "string", "const": "downloaded" },
@@ -626,23 +697,7 @@ fn definition() -> Tool {
             }
         },
         "required": ["status", "project_id", "run_id", "destination", "file_count", "total_bytes", "files"]
-    });
-    Tool::new(
-        NAME,
-        "Download selected artifact files, or all artifact files, from a Nunu run into the local workspace. Artifact directories are preserved beneath one directory per player, and existing files are not overwritten.",
-        input_schema.as_object().cloned().unwrap_or_default(),
-    )
-    .with_title("Download Nunu run files")
-    .with_raw_output_schema(Arc::new(
-        output_schema.as_object().cloned().unwrap_or_default(),
-    ))
-    .with_annotations(
-        ToolAnnotations::new()
-            .read_only(false)
-            .destructive(false)
-            .idempotent(false)
-            .open_world(true),
-    )
+    })
 }
 
 #[cfg(test)]
@@ -657,10 +712,20 @@ mod tests {
             .expect("input properties");
         let mut names: Vec<_> = properties.keys().map(String::as_str).collect();
         names.sort_unstable();
-        assert_eq!(names, ["files", "path", "project_id", "run_id"]);
+        assert_eq!(
+            names,
+            ["destination_dir", "files", "path", "project_id", "run_id"]
+        );
         assert_eq!(
             tool.input_schema["required"],
-            serde_json::json!(["project_id", "run_id", "path"])
+            serde_json::json!(["project_id", "run_id"])
+        );
+        assert_eq!(
+            tool.input_schema["oneOf"],
+            serde_json::json!([
+                { "required": ["destination_dir"] },
+                { "required": ["path"] }
+            ])
         );
         assert_eq!(
             tool.annotations.as_ref().and_then(|a| a.read_only_hint),
@@ -684,10 +749,11 @@ mod tests {
         let input = DownloadRunFilesInput {
             project_id: "project_123".to_string(),
             run_id: "multiplayer_123".to_string(),
-            path: "downloads".to_string(),
+            destination_dir: "downloads".to_string(),
             files: Some(vec![RunFileSelector {
                 run_id: "composite_123-1".to_string(),
                 file_ref: "artifact:logs/output.txt".to_string(),
+                relative_path: None,
             }]),
         };
 
@@ -695,10 +761,12 @@ mod tests {
             .expect("parse selectors")
             .expect("selected-file mode");
 
-        assert!(selected.contains(&(
+        let key = (
             "composite_123-1".to_string(),
-            PathBuf::from("logs/output.txt")
-        )));
+            PathBuf::from("logs/output.txt"),
+        );
+        assert!(selected.contains_key(&key));
+        assert_eq!(selected.get(&key).and_then(|path| path.as_ref()), None);
     }
 
     #[test]
@@ -706,10 +774,11 @@ mod tests {
         let input = DownloadRunFilesInput {
             project_id: "project_123".to_string(),
             run_id: "multiplayer_123".to_string(),
-            path: "downloads".to_string(),
+            destination_dir: "downloads".to_string(),
             files: Some(vec![RunFileSelector {
                 run_id: "composite_123-1".to_string(),
                 file_ref: "event_123#img0".to_string(),
+                relative_path: None,
             }]),
         };
 
@@ -747,9 +816,12 @@ mod tests {
                 },
             ],
         };
-        let selected = HashSet::from([(
-            "composite_123-2".to_string(),
-            PathBuf::from("logs/output.txt"),
+        let selected = HashMap::from([(
+            (
+                "composite_123-2".to_string(),
+                PathBuf::from("logs/output.txt"),
+            ),
+            None,
         )]);
 
         let downloads = tool
@@ -765,6 +837,90 @@ mod tests {
                 .destination
                 .ends_with("player-2/logs/output.txt")
         );
+    }
+
+    #[tokio::test]
+    async fn flattens_single_player_artifacts_by_default() {
+        let root = tempfile::tempdir().expect("create destination root");
+        let config =
+            Config::new("secret".to_string(), "http://localhost:3000/api").expect("create config");
+        let tool = DownloadRunFilesTool::new(
+            config,
+            root.path().canonicalize().expect("canonicalize root"),
+        );
+        let run = RunDetails {
+            players: vec![RunPlayer {
+                id: "composite_123-1".to_string(),
+                player_number: 1,
+                artifacts: vec![RunArtifact {
+                    filename: "custom/attempts.json".to_string(),
+                    url: "https://example.com/attempts".to_string(),
+                    size: 1,
+                }],
+            }],
+        };
+
+        let downloads = tool
+            .plan_downloads(root.path(), run, None)
+            .await
+            .expect("plan single-player artifacts");
+
+        assert_eq!(downloads.len(), 1);
+        assert!(downloads[0].destination.ends_with("custom/attempts.json"));
+    }
+
+    #[tokio::test]
+    async fn uses_a_selected_file_relative_path_override_exactly() {
+        let root = tempfile::tempdir().expect("create destination root");
+        let config =
+            Config::new("secret".to_string(), "http://localhost:3000/api").expect("create config");
+        let tool = DownloadRunFilesTool::new(
+            config,
+            root.path().canonicalize().expect("canonicalize root"),
+        );
+        let run = RunDetails {
+            players: vec![RunPlayer {
+                id: "composite_123-1".to_string(),
+                player_number: 1,
+                artifacts: vec![RunArtifact {
+                    filename: "custom/attempts.json".to_string(),
+                    url: "https://example.com/attempts".to_string(),
+                    size: 1,
+                }],
+            }],
+        };
+        let selected = HashMap::from([(
+            (
+                "composite_123-1".to_string(),
+                PathBuf::from("custom/attempts.json"),
+            ),
+            Some(PathBuf::from("attempts.json")),
+        )]);
+
+        let downloads = tool
+            .plan_downloads(root.path(), run, Some(&selected))
+            .await
+            .expect("plan selected artifact with override");
+
+        assert_eq!(downloads.len(), 1);
+        assert!(downloads[0].destination.ends_with("attempts.json"));
+        assert!(!downloads[0].destination.ends_with("custom/attempts.json"));
+    }
+
+    #[test]
+    fn selected_file_relative_paths_must_be_safe() {
+        let input = DownloadRunFilesInput {
+            project_id: "project_123".to_string(),
+            run_id: "multiplayer_123".to_string(),
+            destination_dir: "downloads".to_string(),
+            files: Some(vec![RunFileSelector {
+                run_id: "composite_123-1".to_string(),
+                file_ref: "artifact:logs/output.txt".to_string(),
+                relative_path: Some("../attempts.json".to_string()),
+            }]),
+        };
+
+        assert!(requested_run_files(&input).is_err());
     }
 
     #[tokio::test]
@@ -890,7 +1046,7 @@ mod tests {
             .download(DownloadRunFilesInput {
                 project_id: "project_123".to_string(),
                 run_id: "run_123".to_string(),
-                path: "downloads".to_string(),
+                destination_dir: "downloads".to_string(),
                 files: None,
             })
             .await
@@ -898,7 +1054,7 @@ mod tests {
 
         server.await.expect("test server completes");
         assert_eq!(
-            std::fs::read(root.path().join("downloads/player-1/logs/output.txt"))
+            std::fs::read(root.path().join("downloads/logs/output.txt"))
                 .expect("read downloaded artifact"),
             b"content"
         );
