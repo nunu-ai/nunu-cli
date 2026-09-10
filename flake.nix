@@ -85,6 +85,30 @@
             ];
         };
 
+        # Release binaries are copied out of the Nix store and must therefore
+        # only depend on libraries provided by macOS. Nix's linker resolves
+        # `-liconv` to the store path from buildInputs, so rewrite it to the
+        # ABI-compatible system library before publishing the binary.
+        darwinStandaloneArgs = lib.optionalAttrs pkgs.stdenv.hostPlatform.isDarwin {
+          nativeBuildInputs = [ pkgs.darwin.autoSignDarwinBinariesHook ];
+
+          postFixup = ''
+            binary="$out/bin/nunu-cli"
+            nix_iconv="${pkgs.libiconv}/lib/libiconv.2.dylib"
+
+            if otool -L "$binary" | sed '1d' | grep -Fq "$nix_iconv"; then
+              install_name_tool -change "$nix_iconv" /usr/lib/libiconv.2.dylib "$binary"
+            fi
+
+            nix_dependencies=$(otool -L "$binary" | sed '1d' | grep -F /nix/store/ || true)
+            if [ -n "$nix_dependencies" ]; then
+              echo "macOS release binary contains non-portable Nix store dependencies:" >&2
+              echo "$nix_dependencies" >&2
+              exit 1
+            fi
+          '';
+        };
+
         # Build *just* the cargo dependencies, so we can reuse
         # all of that work (e.g. via cachix) when running in CI
         cargoArtifacts = craneLib.buildDepsOnly commonArgs;
@@ -98,6 +122,7 @@
         # Regular build (for local development and Darwin)
         nunu-cli = craneLib.buildPackage (
           commonArgs
+          // darwinStandaloneArgs
           // {
             inherit cargoArtifacts;
           }
@@ -107,6 +132,7 @@
         nunu-cli-macos-x86_64 = lib.optionalAttrs (pkgs.stdenv.hostPlatform.isDarwin && pkgs.stdenv.hostPlatform.isAarch64) (
           craneLib.buildPackage (
             commonArgs
+            // darwinStandaloneArgs
             // {
               inherit cargoArtifacts;
               CARGO_BUILD_TARGET = "x86_64-apple-darwin";
