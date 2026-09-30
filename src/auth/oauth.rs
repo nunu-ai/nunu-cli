@@ -398,15 +398,22 @@ fn ensure_url_is_secure(url: &Url, label: &str) -> Result<()> {
 }
 
 fn select_scopes(resource_scopes: &[String], server_scopes: &[String]) -> Option<String> {
-    if !resource_scopes.is_empty() {
-        return Some(resource_scopes.join(" "));
-    }
-
     let supported = server_scopes
         .iter()
         .map(String::as_str)
         .collect::<HashSet<_>>();
-    let defaults = ["openid", "email", "profile"]
+
+    if !resource_scopes.is_empty() {
+        let mut scopes = resource_scopes.to_vec();
+        if supported.contains("offline_access")
+            && !scopes.iter().any(|scope| scope == "offline_access")
+        {
+            scopes.push("offline_access".to_string());
+        }
+        return Some(scopes.join(" "));
+    }
+
+    let defaults = ["openid", "email", "profile", "offline_access"]
         .into_iter()
         .filter(|scope| supported.contains(scope))
         .collect::<Vec<_>>();
