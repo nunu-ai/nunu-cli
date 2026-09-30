@@ -1,13 +1,20 @@
 # Changelog
 
-## [v0.1.29](https://github.com/nunu-ai/nunu-cli/compare/v0.1.28...27e71cbea74f192a6301fac6162d71623a13a823) (2026-09-10)
+## [v0.1.30](https://github.com/nunu-ai/nunu-cli/compare/v0.1.29...24b157c3f659b3b0e68e705762ff07f8c74c436d) (2026-09-30)
 
-### Features
+### Fixes
+
+* oauth flow
+([24b157c](https://github.com/nunu-ai/nunu-cli/commit/24b157c3f659b3b0e68e705762ff07f8c74c436d))
+
+### [v0.1.29](https://github.com/nunu-ai/nunu-cli/compare/v0.1.28...v0.1.29) (2026-09-10)
+
+#### Features
 
 * artifact download tool
 ([6296463](https://github.com/nunu-ai/nunu-cli/commit/629646370899144599e47be839eafef9ba7b1fc6))
 
-### Fixes
+#### Fixes
 
 * download schema
 ([27e71cb](https://github.com/nunu-ai/nunu-cli/commit/27e71cbea74f192a6301fac6162d71623a13a823))
