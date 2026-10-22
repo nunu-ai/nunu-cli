@@ -61,6 +61,7 @@ rustls = { version = "0.23", default-features = false, features = ["ring"] }
 serde = { version = "1.0.219", features = ["derive"] }
 serde_json = "1.0.140"
 sse-stream = "0.2.6"
+tempfile = "3.20"
 thiserror = "2.0.12"
 tokio = { version = "1.45.0", features = [
   "macros",
@@ -75,9 +76,6 @@ tokio = { version = "1.45.0", features = [
 tokio-util = { version = "0.7", features = ["io"] }
 url = "2.5"
 webpki-root-certs = "1.0"
-
-[dev-dependencies]
-tempfile = "3.20"
 
 [target.'cfg(windows)'.build-dependencies]
 winres = "0.1"

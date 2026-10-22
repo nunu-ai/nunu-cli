@@ -5,7 +5,7 @@ mod wait_for;
 use crate::config::Config;
 use async_trait::async_trait;
 use rmcp::{
-    ErrorData,
+    ErrorData, Peer, RoleClient,
     model::{CallToolRequestParams, CallToolResponse, JsonObject, Tool},
 };
 use std::{collections::HashMap, path::PathBuf, sync::Arc};
@@ -28,12 +28,16 @@ pub(super) struct LocalToolRegistry {
 }
 
 impl LocalToolRegistry {
-    pub(super) fn standard(config: Config, allowed_root: PathBuf) -> Self {
+    pub(super) fn standard(
+        config: Config,
+        allowed_root: PathBuf,
+        upstream: Peer<RoleClient>,
+    ) -> Self {
         Self::new([
-            Arc::new(download_run_files::DownloadRunFilesTool::new(
-                config.clone(),
-                allowed_root.clone(),
-            )) as Arc<dyn LocalTool>,
+            Arc::new(
+                download_run_files::DownloadRunFilesTool::new(config.clone(), allowed_root.clone())
+                    .with_upstream(upstream),
+            ) as Arc<dyn LocalTool>,
             Arc::new(upload_build::UploadBuildTool::new(
                 config.clone(),
                 allowed_root,

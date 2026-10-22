@@ -363,8 +363,11 @@ pub async fn serve_stdio(
 ) -> Result<()> {
     credential.validate_mcp_destination(mcp_url)?;
     let allowed_root = resolve_allowed_root(workspace_root).await?;
-    let upload_config = Config::with_credential(credential.clone(), api_url, None)?;
-    let local_tools = Arc::new(LocalToolRegistry::standard(upload_config, allowed_root));
+    let default_project = std::env::var("NUNU_PROJECT_ID")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+    let upload_config = Config::with_credential(credential.clone(), api_url, default_project)?;
     let client = AuthenticatedHttpClient::new(credential)?;
     let transport = StreamableHttpClientTransport::with_client(
         client,
@@ -383,6 +386,11 @@ pub async fn serve_stdio(
         .list_all_tools()
         .await
         .context("failed to list Nunu MCP tools")?;
+    let local_tools = Arc::new(LocalToolRegistry::standard(
+        upload_config,
+        allowed_root,
+        upstream.peer().clone(),
+    ));
     let tools = local_tools.merged_with(remote_tools);
 
     let proxy = ProxyServer {
@@ -463,7 +471,16 @@ mod tests {
             );
             std::future::ready(Ok(ListToolsResult::with_all_items(vec![
                 Tool::new("echo", "Echo a remote response", schema.clone()),
-                Tool::new(UPLOAD_BUILD_TOOL, "Remote upload placeholder", schema),
+                Tool::new(
+                    UPLOAD_BUILD_TOOL,
+                    "Remote upload placeholder",
+                    schema.clone(),
+                ),
+                Tool::new(
+                    DOWNLOAD_RUN_FILES_TOOL,
+                    "Remote ZIP download placeholder",
+                    schema,
+                ),
             ])))
         }
 
@@ -481,6 +498,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[allow(clippy::too_many_lines)] // Exercises discovery, local overrides, remote calls, and disconnection together.
     async fn forwards_tool_discovery_and_calls() {
         let (upstream_client_io, upstream_server_io) = tokio::io::duplex(64 * 1024);
         let (upstream_client_read, upstream_client_write) = tokio::io::split(upstream_client_io);
@@ -506,6 +524,7 @@ mod tests {
         let local_tools = Arc::new(LocalToolRegistry::standard(
             config,
             root.path().canonicalize().expect("canonicalize root"),
+            upstream.peer().clone(),
         ));
         let tools = local_tools.merged_with(tools);
         let proxy = ProxyServer {
@@ -537,6 +556,30 @@ mod tests {
         assert_ne!(
             proxied_tools[2].description.as_deref(),
             Some("Remote upload placeholder")
+        );
+        assert_ne!(
+            proxied_tools[0].description.as_deref(),
+            Some("Remote ZIP download placeholder")
+        );
+        assert!(
+            proxied_tools[0].input_schema["properties"]
+                .get("destination_dir")
+                .is_some()
+        );
+        let download_response = host
+            .call_tool_once(CallToolRequestParams::new(DOWNLOAD_RUN_FILES_TOOL))
+            .await
+            .expect("local download handler handles missing run");
+        let CallToolResponse::Complete(download_error) = download_response else {
+            panic!("expected a complete local download response");
+        };
+        assert_eq!(download_error.is_error, Some(true));
+        assert!(
+            download_error.content[0]
+                .as_text()
+                .expect("text")
+                .text
+                .contains("Which run")
         );
 
         let response = host

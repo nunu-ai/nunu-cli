@@ -111,6 +111,41 @@ For non-interactive use, set `NUNU_API_KEY` in the MCP server environment. Use
 `NUNU_WORKSPACE_ROOT` when file access should be rooted somewhere other than the
 client's working directory.
 
+`download_run_files` downloads selected artifacts or all artifacts from a run.
+Paste a full Nunu run link as `run_id`; the project is inferred and files go to
+`downloads/<project>/<run>` inside the MCP workspace by default:
+
+```json
+{"run_id": "https://nunu.ai/nexus/my-project/runs/c/my-run"}
+```
+
+Raw multiplayer and composite run IDs also work: the CLI asks the authenticated
+remote inspection tool for the owning project when it is not configured.
+Optionally set `destination_dir` (or its `path` alias) to
+choose a folder, and `files: ["logs/output.txt"]` to select filenames. Matching
+files across players are kept in separate player folders. The existing
+`{run_id, file_ref, relative_path}` file selectors still work; their player
+`run_id` is optional. A missing run or project returns guidance instead of
+guessing which run to download.
+For a stored filename that is not portable, use an object selector with a safe
+`relative_path` to choose its local name.
+
+`download_run_files` is a local CLI MCP tool. It saves files directly into the
+workspace and reports their local paths. The remote Nexus MCP does not expose
+a download-link tool.
+
+It transfers up to four files at a time. Each file is downloaded to a temporary
+file, checked against the expected version and size, then saved from that same
+open file handle without overwriting an existing path. Saving copies the
+verified bytes locally. Interrupted transfers discard their temporary files,
+and failed or cancelled saves remove incomplete output.
+The result reports each file as `downloaded` or `failed`; a partial failure
+keeps completed files. Retry failed files with `files` to download them again from
+the beginning. Existing paths return per-file errors and are preserved.
+
+Downloads require a website and Bouncer version that supports artifact download
+manifests.
+
 ## Configuration
 
 - `NUNU_API_KEY`: API key for CI or other non-interactive use

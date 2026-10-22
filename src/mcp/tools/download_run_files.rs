@@ -1,12 +1,20 @@
 use super::LocalTool;
-use crate::{api::Client, config::Config};
+use crate::{
+    api::{
+        Client,
+        client::{ArtifactDownload, ArtifactManifest},
+    },
+    config::Config,
+};
 use anyhow::{Context as _, Result};
 use async_trait::async_trait;
+use futures::{StreamExt as _, stream};
 use rmcp::{
-    ErrorData,
+    ErrorData, Peer, RoleClient,
     model::{CallToolResponse, CallToolResult, ContentBlock, JsonObject, Tool, ToolAnnotations},
+    schemars::JsonSchema,
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet},
     fs,
@@ -15,303 +23,216 @@ use std::{
 };
 
 pub(super) const NAME: &str = "download_run_files";
+mod input;
 
 pub(super) struct DownloadRunFilesTool {
     config: Config,
     allowed_root: PathBuf,
+    upstream: Option<Peer<RoleClient>>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+#[schemars(crate = "rmcp::schemars")]
 struct DownloadRunFilesInput {
+    /// Optional project ID. Inferred from the run link, configuration, or `inspect_run`.
+    #[serde(default)]
     project_id: String,
+    /// Nunu run link or multiplayer/composite run ID from `list_runs` or `inspect_run`.
+    #[serde(default)]
+    #[schemars(!default, length(min = 1))]
     run_id: String,
-    #[serde(alias = "path")]
+    /// Output folder inside the workspace. Defaults to downloads/<project>/<run>.
+    #[serde(default, alias = "path")]
     destination_dir: String,
+    /// Omit for all artifacts; filenames select matching files across players.
+    #[schemars(length(min = 1, max = 1000))]
     files: Option<Vec<RunFileSelector>>,
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct RunFileSelector {
-    run_id: String,
-    file_ref: String,
-    relative_path: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct RunDetails {
-    players: Vec<RunPlayer>,
-}
-
-#[derive(Debug, Deserialize)]
-struct RunPlayer {
-    id: String,
-    player_number: u64,
-    artifacts: Vec<RunArtifact>,
-}
-
-#[derive(Debug, Deserialize)]
-struct RunArtifact {
-    filename: String,
-    url: String,
-    size: u64,
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(untagged, deny_unknown_fields)]
+#[schemars(crate = "rmcp::schemars", inline)]
+enum RunFileSelector {
+    Filename(String),
+    Selector {
+        /// Optional composite run ID to select one player's file.
+        #[serde(default)]
+        run_id: String,
+        /// Stable artifact:<path> reference returned by `inspect_run`.
+        file_ref: String,
+        /// Optional output path relative to the destination, without a player prefix.
+        relative_path: Option<String>,
+    },
 }
 
 struct PlannedDownload {
-    player_number: u64,
-    composite_run_id: String,
-    artifact_path: String,
-    url: String,
-    expected_size: u64,
+    artifact: ArtifactDownload,
     destination: PathBuf,
-    temporary: PathBuf,
 }
 
-type RequestedArtifacts = HashMap<(String, PathBuf), Option<PathBuf>>;
+#[derive(Serialize, JsonSchema)]
+#[schemars(crate = "rmcp::schemars")]
+struct DownloadReport {
+    status: BatchStatus,
+    project_id: String,
+    run_id: String,
+    destination: String,
+    file_count: usize,
+    failed_count: usize,
+    total_bytes: u64,
+    files: Vec<FileReport>,
+}
+
+#[derive(Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+#[schemars(crate = "rmcp::schemars", inline)]
+enum BatchStatus {
+    Downloaded,
+    Partial,
+    Failed,
+}
+
+#[derive(Serialize, JsonSchema)]
+#[schemars(crate = "rmcp::schemars")]
+struct FileReport {
+    player_number: u64,
+    composite_run_id: String,
+    file_ref: String,
+    artifact_path: String,
+    local_path: String,
+    #[serde(flatten)]
+    outcome: FileOutcome,
+}
+
+#[derive(Serialize, JsonSchema)]
+#[serde(tag = "status", rename_all = "snake_case")]
+#[schemars(crate = "rmcp::schemars", inline)]
+enum FileOutcome {
+    Downloaded { size_bytes: u64 },
+    Failed { error: String },
+}
 
 impl DownloadRunFilesTool {
     pub(super) fn new(config: Config, allowed_root: PathBuf) -> Self {
         Self {
             config,
             allowed_root,
+            upstream: None,
         }
     }
 
+    pub(super) fn with_upstream(mut self, upstream: Peer<RoleClient>) -> Self {
+        self.upstream = Some(upstream);
+        self
+    }
+
     async fn download(&self, input: DownloadRunFilesInput) -> Result<CallToolResult> {
-        validate_input(&input)?;
-        let requested_artifacts = requested_run_files(&input)?;
+        let input = input::resolve(input, &self.config, self.upstream.as_ref()).await?;
         let config = Config::with_credential(
             self.config.credential.clone(),
             &self.config.api_url,
-            Some(input.project_id.trim().to_string()),
+            Some(input.project_id.clone()),
         )?;
         let client = Client::new(config)?;
-        let destination_root = self.prepare_destination(&input.destination_dir).await?;
-        let run = client
-            .get_run(input.run_id.trim())
-            .await
-            .context("failed to fetch run files")?;
-        let run: RunDetails = serde_json::from_value(run)
-            .context("the run response did not contain the expected artifact list")?;
-        let downloads = self
-            .plan_downloads(&destination_root, run, requested_artifacts.as_ref())
+        let selectors = input::explicit_selectors(input.files.as_deref())?;
+        let manifest = client
+            .artifact_manifest(&input.run_id, selectors.as_deref())
             .await?;
-        let mut cleanup = DownloadCleanup::new(&downloads);
-
-        let mut completed = Vec::with_capacity(downloads.len());
-        for download in &downloads {
-            match client
-                .download_to_file(&download.url, &download.temporary)
-                .await
-            {
-                Ok(bytes) if bytes == download.expected_size => completed.push(bytes),
-                Ok(bytes) => {
-                    anyhow::bail!(
-                        "artifact '{}' was incomplete: expected {} bytes, downloaded {bytes}",
-                        download.artifact_path,
-                        download.expected_size
-                    );
+        let destination = self.prepare_destination(&input.destination_dir).await?;
+        let downloads = self
+            .plan_downloads(&destination, manifest, input.files.as_deref())
+            .await?;
+        // Ordered buffering keeps manifest order without indexing and sorting results.
+        let client = &client;
+        let files = stream::iter(downloads)
+            .map(|download| async move {
+                let outcome = match download_one(client, &download).await {
+                    Ok(()) => FileOutcome::Downloaded {
+                        size_bytes: download.artifact.size_bytes,
+                    },
+                    Err(error) => FileOutcome::Failed {
+                        error: format!("{error:#}"),
+                    },
+                };
+                FileReport {
+                    player_number: download.artifact.player_number,
+                    composite_run_id: download.artifact.composite_run_id,
+                    file_ref: format!("artifact:{}", download.artifact.filename),
+                    artifact_path: download.artifact.filename,
+                    local_path: download.destination.to_string_lossy().into_owned(),
+                    outcome,
                 }
-                Err(error) => {
-                    return Err(error).with_context(|| {
-                        format!("failed to download artifact '{}'", download.artifact_path)
-                    });
-                }
-            }
-        }
-
-        for download in &downloads {
-            if let Err(error) = finalize_download(&download.temporary, &download.destination).await
-            {
-                return Err(error).with_context(|| {
-                    format!(
-                        "failed to finalize downloaded artifact '{}'",
-                        download.artifact_path
-                    )
-                });
-            }
-            cleanup.record_finalized(download.destination.clone());
-        }
-
-        let files: Vec<_> = downloads
-            .iter()
-            .zip(completed.iter())
-            .map(|(download, bytes)| {
-                serde_json::json!({
-                    "player_number": download.player_number,
-                    "composite_run_id": download.composite_run_id,
-                    "file_ref": format!("artifact:{}", download.artifact_path),
-                    "artifact_path": download.artifact_path,
-                    "local_path": download.destination.to_string_lossy(),
-                    "size_bytes": bytes,
-                })
             })
-            .collect();
-        let total_bytes: u64 = completed.iter().sum();
-        let file_count = files.len();
-        let structured = serde_json::json!({
-            "status": "downloaded",
-            "project_id": input.project_id.trim(),
-            "run_id": input.run_id.trim(),
-            "destination": destination_root.to_string_lossy(),
-            "file_count": file_count,
-            "total_bytes": total_bytes,
-            "files": files,
-        });
+            .buffered(4)
+            .collect::<Vec<_>>()
+            .await;
+        let (mut file_count, mut total_bytes) = (0, 0);
+        for file in &files {
+            if let FileOutcome::Downloaded { size_bytes } = file.outcome {
+                file_count += 1;
+                total_bytes += size_bytes;
+            }
+        }
+        let failed_count = files.len() - file_count;
+        let report = DownloadReport {
+            status: match (file_count, failed_count) {
+                (_, 0) => BatchStatus::Downloaded,
+                (0, _) => BatchStatus::Failed,
+                _ => BatchStatus::Partial,
+            },
+            project_id: input.project_id,
+            run_id: input.run_id,
+            destination: destination.to_string_lossy().into_owned(),
+            file_count,
+            failed_count,
+            total_bytes,
+            files,
+        };
         let mut result = CallToolResult::success(vec![ContentBlock::text(format!(
-            "Downloaded {file_count} run artifact(s) ({total_bytes} bytes) to '{}'.",
-            destination_root.display()
+            "Downloaded {file_count} run artifact(s) ({total_bytes} bytes); {failed_count} failed. Existing paths are preserved. Retry failed files from the beginning using files."
         ))]);
-        result.structured_content = Some(structured);
-        cleanup.disarm();
+        result.is_error = Some(failed_count != 0);
+        result.structured_content = Some(serde_json::to_value(report)?);
         Ok(result)
     }
 
     async fn prepare_destination(&self, requested: &str) -> Result<PathBuf> {
-        let requested = Path::new(requested);
-        let relative = if requested.is_absolute() {
-            resolve_absolute_destination(&self.allowed_root, requested).await?
-        } else {
-            requested.to_path_buf()
-        };
-
-        let mut destination = self.allowed_root.clone();
-        for component in relative.components() {
-            match component {
-                Component::CurDir => {}
-                Component::Normal(component) => {
-                    destination.push(component);
-                    match tokio::fs::metadata(&destination).await {
-                        Ok(metadata) => anyhow::ensure!(
-                            metadata.is_dir(),
-                            "the download destination '{}' is not a directory",
-                            destination.display()
-                        ),
-                        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                            tokio::fs::create_dir(&destination).await.with_context(|| {
-                                format!(
-                                    "failed to create download directory '{}'",
-                                    destination.display()
-                                )
-                            })?;
-                        }
-                        Err(error) => return Err(error.into()),
-                    }
-                    destination = tokio::fs::canonicalize(&destination).await?;
-                    anyhow::ensure!(
-                        destination.starts_with(&self.allowed_root),
-                        "the download destination is outside the MCP server's allowed directory"
-                    );
-                }
-                Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
-                    anyhow::bail!("the download destination cannot contain parent traversal")
-                }
-            }
-        }
-        Ok(destination)
+        prepare_directory(&self.allowed_root, Path::new(requested)).await
     }
 
     async fn plan_downloads(
         &self,
-        destination_root: &Path,
-        run: RunDetails,
-        requested_artifacts: Option<&HashMap<(String, PathBuf), Option<PathBuf>>>,
+        root: &Path,
+        manifest: ArtifactManifest,
+        selectors: Option<&[RunFileSelector]>,
     ) -> Result<Vec<PlannedDownload>> {
-        let use_player_directories = run.players.len() > 1;
-        let mut selected_artifacts = Vec::new();
-        let mut missing_artifacts: HashSet<(String, PathBuf)> = requested_artifacts
-            .map(|files| files.keys().cloned().collect())
-            .unwrap_or_default();
-        for player in run.players {
-            for artifact in player.artifacts {
-                let relative = safe_artifact_path(&artifact.filename)?;
-                let stable_ref = (player.id.clone(), relative.clone());
-                let requested_relative_path = match requested_artifacts {
-                    Some(files) => match files.get(&stable_ref) {
-                        Some(relative_path) => relative_path.clone(),
-                        None => continue,
-                    },
-                    None => None,
-                };
-                missing_artifacts.remove(&stable_ref);
-                selected_artifacts.push((
-                    player.player_number,
-                    player.id.clone(),
-                    artifact,
-                    relative,
-                    requested_relative_path,
-                ));
-            }
-        }
-        if !missing_artifacts.is_empty() {
-            let mut missing: Vec<_> = missing_artifacts
-                .iter()
-                .map(|(run_id, path)| format!("{run_id}/artifact:{}", path.to_string_lossy()))
-                .collect();
-            missing.sort_unstable();
-            anyhow::bail!(
-                "requested run file(s) were not found: {}",
-                missing.join(", ")
-            );
-        }
-
-        let mut downloads = Vec::new();
+        let multiplayer = manifest.players.len() > 1;
+        let players: HashMap<_, _> = manifest
+            .players
+            .into_iter()
+            .map(|player| (player.id, player.player_number))
+            .collect();
+        let selected = input::select_files(selectors, manifest.files, multiplayer)?;
         let mut destinations = HashSet::new();
-        for (
-            player_number,
-            composite_run_id,
-            artifact,
-            artifact_relative,
-            requested_relative_path,
-        ) in selected_artifacts
-        {
-            let output_relative = requested_relative_path.unwrap_or_else(|| {
-                if use_player_directories {
-                    PathBuf::from(format!("player-{player_number}")).join(&artifact_relative)
-                } else {
-                    artifact_relative.clone()
-                }
-            });
-            let file_name = output_relative
-                .file_name()
-                .context("artifact filename is empty")?;
-            let parent_relative = output_relative
-                .parent()
-                .context("artifact destination has no parent directory")?;
-            let parent = prepare_child_directory(destination_root, parent_relative)
-                .await
-                .with_context(|| {
-                    format!(
-                        "failed to prepare local directory for artifact '{}'",
-                        artifact.filename
-                    )
-                })?;
-            let destination = parent.join(file_name);
+        let mut downloads = Vec::new();
+        for (artifact, output) in selected {
+            anyhow::ensure!(
+                players.get(&artifact.composite_run_id) == Some(&artifact.player_number),
+                "artifact manifest references an unknown or inconsistent player"
+            );
+            let parent =
+                prepare_directory(root, output.parent().context("missing output directory")?)
+                    .await?;
+            let destination = parent.join(output.file_name().context("missing output filename")?);
             anyhow::ensure!(
                 destinations.insert(destination.clone()),
-                "multiple run artifacts resolve to the same local path '{}'",
+                "multiple artifacts resolve to '{}'",
                 destination.display()
-            );
-            anyhow::ensure!(
-                !tokio::fs::try_exists(&destination).await?,
-                "refusing to overwrite existing path '{}'",
-                destination.display()
-            );
-            let temporary = temporary_path(&destination, downloads.len());
-            anyhow::ensure!(
-                !tokio::fs::try_exists(&temporary).await?,
-                "temporary download path already exists: '{}'",
-                temporary.display()
             );
             downloads.push(PlannedDownload {
-                player_number,
-                composite_run_id,
-                artifact_path: artifact.filename,
-                url: artifact.url,
-                expected_size: artifact.size,
+                artifact,
                 destination,
-                temporary,
             });
         }
         Ok(downloads)
@@ -323,386 +244,302 @@ impl LocalTool for DownloadRunFilesTool {
     fn name(&self) -> &'static str {
         NAME
     }
-
     fn definition(&self) -> Tool {
         definition()
     }
-
     async fn call(
         &self,
         arguments: Option<JsonObject>,
     ) -> std::result::Result<CallToolResponse, ErrorData> {
-        let arguments = arguments.unwrap_or_default();
         let input =
-            serde_json::from_value::<DownloadRunFilesInput>(serde_json::Value::Object(arguments))
+            serde_json::from_value(serde_json::Value::Object(arguments.unwrap_or_default()))
                 .map_err(|error| {
-                ErrorData::invalid_params(format!("invalid {NAME} arguments: {error}"), None)
-            })?;
-        let result = match self.download(input).await {
+                    ErrorData::invalid_params(format!("invalid {NAME} arguments: {error}"), None)
+                })?;
+        Ok(match self.download(input).await {
             Ok(result) => result,
             Err(error) => CallToolResult::error(vec![ContentBlock::text(format!(
                 "Run file download failed: {error:#}"
             ))]),
-        };
-        Ok(result.into())
+        }
+        .into())
     }
 }
 
-fn validate_input(input: &DownloadRunFilesInput) -> Result<()> {
+fn validate_artifact_path(filename: &str) -> Result<()> {
     anyhow::ensure!(
-        !input.project_id.trim().is_empty(),
-        "project_id cannot be empty"
+        !filename.chars().any(|c| c.is_control() || c == '\\')
+            && filename
+                .split('/')
+                .all(|part| !part.is_empty() && part != "." && part != ".."),
+        "unsafe artifact path: {filename:?}"
     );
-    anyhow::ensure!(!input.run_id.trim().is_empty(), "run_id cannot be empty");
-    anyhow::ensure!(
-        !input.destination_dir.trim().is_empty(),
-        "destination_dir cannot be empty"
-    );
-    if let Some(files) = &input.files {
-        anyhow::ensure!(!files.is_empty(), "files cannot be empty");
-    }
     Ok(())
-}
-
-fn requested_run_files(input: &DownloadRunFilesInput) -> Result<Option<RequestedArtifacts>> {
-    let Some(files) = &input.files else {
-        return Ok(None);
-    };
-    let mut requested = HashMap::with_capacity(files.len());
-    for file in files {
-        let run_id = file.run_id.trim();
-        anyhow::ensure!(!run_id.is_empty(), "files[].run_id cannot be empty");
-        let artifact_path = file.file_ref.strip_prefix("artifact:").with_context(|| {
-            format!(
-                "invalid file_ref '{}': only artifact:<path> references can be downloaded",
-                file.file_ref
-            )
-        })?;
-        let safe = safe_artifact_path(artifact_path)
-            .with_context(|| format!("invalid file_ref '{}'", file.file_ref))?;
-        let relative_path = file
-            .relative_path
-            .as_deref()
-            .map(|path| {
-                safe_relative_file_path(path, "files[].relative_path")
-                    .with_context(|| format!("invalid relative_path for '{}'", file.file_ref))
-            })
-            .transpose()?;
-        anyhow::ensure!(
-            requested
-                .insert((run_id.to_string(), safe), relative_path)
-                .is_none(),
-            "files contains a duplicate selector: run_id '{run_id}', file_ref '{}'",
-            file.file_ref
-        );
-    }
-    Ok(Some(requested))
 }
 
 fn safe_artifact_path(filename: &str) -> Result<PathBuf> {
-    safe_relative_file_path(filename, "artifact filename")
-}
-
-fn safe_relative_file_path(filename: &str, description: &str) -> Result<PathBuf> {
-    anyhow::ensure!(!filename.trim().is_empty(), "{description} cannot be empty");
-    let path = Path::new(filename);
+    validate_artifact_path(filename)?;
     anyhow::ensure!(
-        !path.is_absolute(),
-        "{description} cannot be absolute: '{filename}'"
+        !filename
+            .chars()
+            .any(|c| matches!(c, ':' | '<' | '>' | '"' | '|' | '?' | '*'))
+            && filename.split('/').all(|part| {
+                let device = part
+                    .split('.')
+                    .next()
+                    .unwrap_or_default()
+                    .to_ascii_lowercase();
+                !part.ends_with(['.', ' '])
+                    && !matches!(device.as_str(), "con" | "prn" | "aux" | "nul")
+                    && !(device.len() == 4
+                        && (device.starts_with("com") || device.starts_with("lpt"))
+                        && matches!(device.as_bytes()[3], b'1'..=b'9'))
+            }),
+        "unsafe or non-portable artifact path: {filename:?}"
     );
-    let mut safe = PathBuf::new();
-    for component in path.components() {
-        match component {
-            Component::Normal(component) => safe.push(component),
-            _ => anyhow::bail!("{description} contains unsafe traversal: '{filename}'"),
-        }
-    }
-    anyhow::ensure!(safe.file_name().is_some(), "{description} cannot be empty");
-    Ok(safe)
+    Ok(PathBuf::from(filename))
 }
 
-fn temporary_path(destination: &Path, index: usize) -> PathBuf {
-    let name = destination
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or("artifact");
-    destination.with_file_name(format!(
-        ".{name}.nunu-download-{}-{index}.part",
-        std::process::id()
-    ))
-}
-
-struct DownloadCleanup {
-    temporary: Vec<PathBuf>,
-    finalized: Vec<PathBuf>,
-    armed: bool,
-}
-
-impl DownloadCleanup {
-    fn new(downloads: &[PlannedDownload]) -> Self {
-        Self {
-            temporary: downloads
-                .iter()
-                .map(|download| download.temporary.clone())
-                .collect(),
-            finalized: Vec::with_capacity(downloads.len()),
-            armed: true,
-        }
+async fn download_one(client: &Client, download: &PlannedDownload) -> Result<()> {
+    match fs::symlink_metadata(&download.destination) {
+        Ok(_) => anyhow::bail!(
+            "refusing to overwrite existing path '{}'",
+            download.destination.display()
+        ),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error.into()),
     }
-
-    fn record_finalized(&mut self, path: PathBuf) {
-        self.finalized.push(path);
-    }
-
-    fn disarm(&mut self) {
-        self.armed = false;
-    }
-}
-
-impl Drop for DownloadCleanup {
-    fn drop(&mut self) {
-        if !self.armed {
-            return;
-        }
-        for path in &self.temporary {
-            let _ = fs::remove_file(path);
-        }
-        for path in &self.finalized {
-            let _ = fs::remove_file(path);
-        }
-    }
-}
-
-struct CreatedFileCleanup {
-    path: PathBuf,
-    armed: bool,
-}
-
-impl CreatedFileCleanup {
-    fn new(path: &Path) -> Self {
-        Self {
-            path: path.to_path_buf(),
-            armed: true,
-        }
-    }
-
-    fn disarm(&mut self) {
-        self.armed = false;
-    }
-}
-
-impl Drop for CreatedFileCleanup {
-    fn drop(&mut self) {
-        if self.armed {
-            let _ = fs::remove_file(&self.path);
-        }
-    }
-}
-
-async fn finalize_download(temporary: &Path, destination: &Path) -> std::io::Result<()> {
-    match fs::hard_link(temporary, destination) {
-        Ok(()) => {
-            let mut destination_cleanup = CreatedFileCleanup::new(destination);
-            tokio::fs::remove_file(temporary).await?;
-            destination_cleanup.disarm();
-            Ok(())
-        }
-        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => Err(error),
-        Err(_) => copy_without_overwrite(temporary, destination).await,
-    }
-}
-
-async fn copy_without_overwrite(temporary: &Path, destination: &Path) -> std::io::Result<()> {
-    use tokio::io::AsyncWriteExt as _;
-
-    let source = fs::File::open(temporary)?;
-    let destination_file = fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(destination)?;
-    let mut destination_cleanup = CreatedFileCleanup::new(destination);
-    let mut source = tokio::fs::File::from_std(source);
-    let mut destination_file = tokio::fs::File::from_std(destination_file);
-    tokio::io::copy(&mut source, &mut destination_file).await?;
-    destination_file.flush().await?;
-    drop(destination_file);
-    tokio::fs::remove_file(temporary).await?;
-    destination_cleanup.disarm();
+    let parent = download
+        .destination
+        .parent()
+        .context("missing output directory")?;
+    // This file has no replaceable pathname on Unix; Windows locks its name
+    // until the handle closes. Finalization also reads only this handle.
+    let mut temporary = tempfile::tempfile_in(parent)?;
+    client
+        .download_signed_artifact(&download.artifact, &mut temporary)
+        .await?;
+    save_download(&mut temporary, &download.destination)
+        .await
+        .context("failed to finalize the downloaded artifact")?;
     Ok(())
 }
 
-async fn resolve_absolute_destination(allowed_root: &Path, requested: &Path) -> Result<PathBuf> {
+struct IncompleteDownload<'a> {
+    destination: &'a Path,
+    file: Option<fs::File>,
+}
+
+#[cfg(unix)]
+impl IncompleteDownload<'_> {
+    fn owns_path(&self) -> std::io::Result<bool> {
+        use std::os::unix::fs::MetadataExt as _;
+
+        let file = self
+            .file
+            .as_ref()
+            .ok_or_else(|| std::io::Error::other("download output is closed"))?;
+        let opened = file.metadata()?;
+        let current = fs::symlink_metadata(self.destination)?;
+        Ok(current.is_file() && opened.dev() == current.dev() && opened.ino() == current.ino())
+    }
+}
+
+impl Drop for IncompleteDownload<'_> {
+    fn drop(&mut self) {
+        #[cfg(unix)]
+        let remove_output = self.owns_path().unwrap_or(false);
+        // Windows denies deletion/renaming while this output handle is open.
+        #[cfg(not(unix))]
+        let remove_output = true;
+        if let Some(file) = self.file.take() {
+            // Windows must close the handle before the incomplete file is removed.
+            drop(file);
+            if remove_output {
+                let _ = fs::remove_file(self.destination);
+            }
+        }
+    }
+}
+
+async fn save_download(verified: &mut fs::File, destination: &Path) -> std::io::Result<()> {
+    use std::io::{Read as _, Seek as _, Write as _};
+
+    verified.rewind()?;
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt as _;
+        options.mode(0o600);
+    }
+    let mut pending = IncompleteDownload {
+        destination,
+        file: Some(options.open(destination)?),
+    };
+    let output = pending
+        .file
+        .as_mut()
+        .ok_or_else(|| std::io::Error::other("download output is closed"))?;
+    // Never reopen or rename a temporary pathname: only the verified handle
+    // supplies bytes. create_new refuses existing files and symlinks.
+    let mut buffer = vec![0_u8; 128 * 1024];
+    loop {
+        let count = verified.read(&mut buffer)?;
+        if count == 0 {
+            break;
+        }
+        output.write_all(&buffer[..count])?;
+        // Yield between bounded writes so large saves remain cancellable and
+        // other downloads can continue. Cancellation drops the cleanup guard.
+        tokio::task::yield_now().await;
+    }
+    output.flush()?;
+    #[cfg(unix)]
+    if !pending.owns_path()? {
+        return Err(std::io::Error::other(
+            "download output path changed during saving",
+        ));
+    }
+    drop(pending.file.take());
+    Ok(())
+}
+
+async fn prepare_directory(root: &Path, requested: &Path) -> Result<PathBuf> {
     anyhow::ensure!(
         !requested
             .components()
-            .any(|component| matches!(component, Component::ParentDir)),
-        "the download destination cannot contain parent traversal"
+            .any(|part| part == Component::ParentDir),
+        "download directory cannot contain parent traversal"
     );
-
-    let mut existing = requested.to_path_buf();
-    let canonical_existing = loop {
-        match tokio::fs::canonicalize(&existing).await {
+    let candidate = root.join(requested);
+    let mut ancestor = candidate.clone();
+    let mut directory = loop {
+        match tokio::fs::canonicalize(&ancestor).await {
             Ok(path) => break path,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                anyhow::ensure!(
-                    existing.pop(),
-                    "the download destination has no existing ancestor"
-                );
+                anyhow::ensure!(ancestor.pop(), "destination has no existing ancestor");
             }
             Err(error) => return Err(error.into()),
         }
     };
-    let unresolved = requested.strip_prefix(&existing)?;
-    let relative_existing = canonical_existing
-        .strip_prefix(allowed_root)
-        .with_context(|| {
-            format!(
-                "the download destination is outside the MCP server's allowed directory '{}': {}",
-                allowed_root.display(),
-                requested.display()
-            )
-        })?;
-    Ok(relative_existing.join(unresolved))
-}
-
-async fn prepare_child_directory(root: &Path, relative: &Path) -> Result<PathBuf> {
-    let mut directory = root.to_path_buf();
-    for component in relative.components() {
-        let Component::Normal(component) = component else {
-            anyhow::bail!("artifact directory contains unsafe traversal")
-        };
-        directory.push(component);
-        match tokio::fs::metadata(&directory).await {
-            Ok(metadata) => anyhow::ensure!(
-                metadata.is_dir(),
-                "artifact directory '{}' is not a directory",
-                directory.display()
-            ),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                tokio::fs::create_dir(&directory).await?;
-            }
+    anyhow::ensure!(
+        directory.starts_with(root),
+        "download directory is outside the allowed directory"
+    );
+    anyhow::ensure!(
+        tokio::fs::metadata(&directory).await?.is_dir(),
+        "download path is not a directory"
+    );
+    for component in candidate.strip_prefix(ancestor)?.components() {
+        match component {
+            Component::CurDir => continue,
+            Component::Normal(name) => directory.push(name),
+            _ => anyhow::bail!("invalid download directory"),
+        }
+        match tokio::fs::create_dir(&directory).await {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
             Err(error) => return Err(error.into()),
         }
         directory = tokio::fs::canonicalize(&directory).await?;
         anyhow::ensure!(
             directory.starts_with(root),
-            "artifact directory is outside the download destination"
+            "download directory is outside the allowed directory"
+        );
+        anyhow::ensure!(
+            tokio::fs::metadata(&directory).await?.is_dir(),
+            "download path is not a directory"
         );
     }
     Ok(directory)
 }
 
 fn definition() -> Tool {
-    let input_schema = serde_json::json!({
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {
-            "project_id": {
-                "type": "string",
-                "minLength": 1,
-                "description": "ID of the Nunu project containing the run."
-            },
-            "run_id": {
-                "type": "string",
-                "minLength": 1,
-                "description": "ID of the multiplayer run whose artifacts should be downloaded."
-            },
-            "path": {
-                "type": "string",
-                "minLength": 1,
-                "description": "Deprecated alias for destination_dir."
-            },
-            "destination_dir": {
-                "type": "string",
-                "minLength": 1,
-                "description": "Local destination directory, absolute or relative to the configured MCP workspace root. It is created when needed. If a selected file has no relative_path, single-player runs preserve the artifact path while multiplayer runs prefix it with player-<number>. Existing files are never overwritten."
-            },
-            "files": {
-                "type": "array",
-                "minItems": 1,
-                "items": {
-                    "type": "object",
-                    "additionalProperties": false,
-                    "properties": {
-                        "run_id": {
-                            "type": "string",
-                            "minLength": 1,
-                            "description": "Composite run ID returned by inspect_run."
-                        },
-                        "file_ref": {
-                            "type": "string",
-                            "pattern": "^artifact:.+",
-                            "description": "Stable artifact:<path> file reference returned by inspect_run."
-                        },
-                        "relative_path": {
-                            "type": "string",
-                            "minLength": 1,
-                            "description": "Optional safe path relative to destination_dir for this file. When provided, it is used exactly and is not prefixed with a player directory."
-                        }
-                    },
-                    "required": ["run_id", "file_ref"]
-                },
-                "description": "Optional stable run-file selectors returned by inspect_run. Omit this field to download every artifact in the run. Each selected file may provide a relative_path output override."
-            }
-        },
-        "required": ["project_id", "run_id"],
-        "oneOf": [
-            { "required": ["destination_dir"] },
-            { "required": ["path"] }
-        ]
-    });
-    let output_schema = output_schema();
-    Tool::new(
-        NAME,
-        "Download selected artifact files, or all artifact files, from a Nunu run into the local workspace. Use destination_dir as the shared output root; selected files may provide relative_path overrides. Without overrides, single-player runs preserve artifact paths and multiplayer runs use player-<number>/ directories. Existing files are never overwritten.",
-        input_schema.as_object().cloned().unwrap_or_default(),
-    )
-    .with_title("Download Nunu run files")
-    .with_raw_output_schema(Arc::new(
-        output_schema.as_object().cloned().unwrap_or_default(),
-    ))
-    .with_annotations(
-        ToolAnnotations::new()
-            .read_only(false)
-            .destructive(false)
-            .idempotent(false)
-            .open_world(true),
-    )
-}
-
-fn output_schema() -> serde_json::Value {
-    serde_json::json!({
-        "type": "object",
-        "properties": {
-            "status": { "type": "string", "const": "downloaded" },
-            "project_id": { "type": "string" },
-            "run_id": { "type": "string" },
-            "destination": { "type": "string" },
-            "file_count": { "type": "integer" },
-            "total_bytes": { "type": "integer" },
-            "files": {
-                "type": "array",
-                "items": {
-                    "type": "object",
-                    "properties": {
-                        "player_number": { "type": "integer" },
-                        "composite_run_id": { "type": "string" },
-                        "file_ref": { "type": "string" },
-                        "artifact_path": { "type": "string" },
-                        "local_path": { "type": "string" },
-                        "size_bytes": { "type": "integer" }
-                    },
-                    "required": ["player_number", "composite_run_id", "file_ref", "artifact_path", "local_path", "size_bytes"]
-                }
-            }
-        },
-        "required": ["status", "project_id", "run_id", "destination", "file_count", "total_bytes", "files"]
-    })
+    let mut tool = Tool::new(NAME,
+        "Download a Nunu run's files into the workspace. A run link or run ID is enough. Multiple players get separate player-<number> folders. Existing paths return per-file errors and are preserved; use files to retry failed downloads from the beginning.",
+        JsonObject::new())
+        .with_input_schema::<DownloadRunFilesInput>()
+        .with_output_schema::<DownloadReport>()
+        .with_title("Download Nunu run files")
+        .with_annotations(ToolAnnotations::new().read_only(false).destructive(false).idempotent(true).open_world(true));
+    // Serde accepts the legacy alias; expose it in the advertised schema too.
+    if let Some(properties) = Arc::make_mut(&mut tool.input_schema)
+        .get_mut("properties")
+        .and_then(serde_json::Value::as_object_mut)
+    {
+        properties.insert("path".to_string(), properties["destination_dir"].clone());
+    }
+    tool
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::api::client::ArtifactPlayer;
+
+    fn artifact(
+        run_id: &str,
+        player_number: u64,
+        filename: &str,
+        size_bytes: u64,
+    ) -> ArtifactDownload {
+        ArtifactDownload {
+            composite_run_id: run_id.to_string(),
+            player_number,
+            filename: filename.to_string(),
+            size_bytes,
+            etag: "\"v1\"".to_string(),
+            download_url: "https://example.invalid/artifact".to_string(),
+        }
+    }
+
+    fn workspace_tool(root: &Path) -> DownloadRunFilesTool {
+        DownloadRunFilesTool::new(
+            Config::new("secret".to_string(), "http://localhost:3000/api").expect("config"),
+            root.canonicalize().expect("workspace"),
+        )
+    }
+
+    fn manifest(files: Vec<ArtifactDownload>) -> ArtifactManifest {
+        let mut players: Vec<ArtifactPlayer> = Vec::new();
+        for file in &files {
+            if !players
+                .iter()
+                .any(|player| player.id == file.composite_run_id)
+            {
+                players.push(ArtifactPlayer {
+                    id: file.composite_run_id.clone(),
+                    player_number: file.player_number,
+                });
+            }
+        }
+        ArtifactManifest { players, files }
+    }
+
+    async fn read_request(socket: &mut tokio::net::TcpStream) -> String {
+        use tokio::io::AsyncReadExt as _;
+        let mut bytes = Vec::new();
+        loop {
+            let mut chunk = [0; 8192];
+            let count = socket.read(&mut chunk).await.expect("request");
+            assert!(count > 0, "incomplete request");
+            bytes.extend_from_slice(&chunk[..count]);
+            if let Some(end) = bytes.windows(4).position(|bytes| bytes == b"\r\n\r\n") {
+                let headers = String::from_utf8_lossy(&bytes[..end]).to_ascii_lowercase();
+                let length = headers
+                    .lines()
+                    .find_map(|line| line.strip_prefix("content-length:"))
+                    .map_or(0, |value| {
+                        value.trim().parse::<usize>().expect("content length")
+                    });
+                if bytes.len() >= end + 4 + length {
+                    break;
+                }
+            }
+        }
+        String::from_utf8(bytes).expect("request text")
+    }
 
     #[test]
     fn schema_has_only_the_required_public_inputs() {
@@ -716,21 +553,19 @@ mod tests {
             names,
             ["destination_dir", "files", "path", "project_id", "run_id"]
         );
-        assert_eq!(
-            tool.input_schema["required"],
-            serde_json::json!(["project_id", "run_id"])
-        );
-        assert_eq!(
-            tool.input_schema["oneOf"],
-            serde_json::json!([
-                { "required": ["destination_dir"] },
-                { "required": ["path"] }
-            ])
-        );
+        assert_eq!(tool.input_schema["required"], serde_json::json!(["run_id"]));
+        assert!(tool.input_schema.get("oneOf").is_none());
         assert_eq!(
             tool.annotations.as_ref().and_then(|a| a.read_only_hint),
             Some(false)
         );
+        assert_eq!(tool.input_schema["additionalProperties"], false);
+        for invalid in [
+            serde_json::json!({"run_id":"run-1", "download_url":"https://foreign.test"}),
+            serde_json::json!({"files":[{"file_ref":"artifact:file", "download_url":"https://foreign.test"}]}),
+        ] {
+            assert!(serde_json::from_value::<DownloadRunFilesInput>(invalid).is_err());
+        }
     }
 
     #[test]
@@ -742,6 +577,21 @@ mod tests {
         assert!(safe_artifact_path("../secret").is_err());
         assert!(safe_artifact_path("/etc/passwd").is_err());
         assert!(safe_artifact_path("").is_err());
+        for path in [
+            "a/../secret",
+            "a\\..\\secret",
+            "C:/secret",
+            "file:stream",
+            ".. /secret",
+            "a./secret",
+            "NUL.txt",
+            "COM1/log",
+            "a//b",
+            "a/./b",
+            "a\0b",
+        ] {
+            assert!(safe_artifact_path(path).is_err(), "unsafe path: {path:?}");
+        }
     }
 
     #[test]
@@ -750,23 +600,19 @@ mod tests {
             project_id: "project_123".to_string(),
             run_id: "multiplayer_123".to_string(),
             destination_dir: "downloads".to_string(),
-            files: Some(vec![RunFileSelector {
+            files: Some(vec![RunFileSelector::Selector {
                 run_id: "composite_123-1".to_string(),
                 file_ref: "artifact:logs/output.txt".to_string(),
                 relative_path: None,
             }]),
         };
 
-        let selected = requested_run_files(&input)
+        let selected = input::explicit_selectors(input.files.as_deref())
             .expect("parse selectors")
-            .expect("selected-file mode");
-
-        let key = (
-            "composite_123-1".to_string(),
-            PathBuf::from("logs/output.txt"),
-        );
-        assert!(selected.contains_key(&key));
-        assert_eq!(selected.get(&key).and_then(|path| path.as_ref()), None);
+            .expect("scoped selectors");
+        assert_eq!(selected.len(), 1);
+        assert_eq!(selected[0].run_id, "composite_123-1");
+        assert_eq!(selected[0].file_ref, "artifact:logs/output.txt");
     }
 
     #[test]
@@ -775,54 +621,29 @@ mod tests {
             project_id: "project_123".to_string(),
             run_id: "multiplayer_123".to_string(),
             destination_dir: "downloads".to_string(),
-            files: Some(vec![RunFileSelector {
+            files: Some(vec![RunFileSelector::Selector {
                 run_id: "composite_123-1".to_string(),
                 file_ref: "event_123#img0".to_string(),
                 relative_path: None,
             }]),
         };
 
-        assert!(requested_run_files(&input).is_err());
+        assert!(input::explicit_selectors(input.files.as_deref()).is_err());
     }
 
     #[tokio::test]
     async fn plans_only_files_matching_stable_run_and_file_refs() {
         let root = tempfile::tempdir().expect("create destination root");
-        let config =
-            Config::new("secret".to_string(), "http://localhost:3000/api").expect("create config");
-        let tool = DownloadRunFilesTool::new(
-            config,
-            root.path().canonicalize().expect("canonicalize root"),
-        );
-        let run = RunDetails {
-            players: vec![
-                RunPlayer {
-                    id: "composite_123-1".to_string(),
-                    player_number: 1,
-                    artifacts: vec![RunArtifact {
-                        filename: "logs/output.txt".to_string(),
-                        url: "https://example.com/player-1".to_string(),
-                        size: 1,
-                    }],
-                },
-                RunPlayer {
-                    id: "composite_123-2".to_string(),
-                    player_number: 2,
-                    artifacts: vec![RunArtifact {
-                        filename: "logs/output.txt".to_string(),
-                        url: "https://example.com/player-2".to_string(),
-                        size: 2,
-                    }],
-                },
-            ],
-        };
-        let selected = HashMap::from([(
-            (
-                "composite_123-2".to_string(),
-                PathBuf::from("logs/output.txt"),
-            ),
-            None,
-        )]);
+        let tool = workspace_tool(root.path());
+        let run = manifest(vec![
+            artifact("composite_123-1", 1, "logs/output.txt", 1),
+            artifact("composite_123-2", 2, "logs/output.txt", 2),
+        ]);
+        let selected = [RunFileSelector::Selector {
+            run_id: "composite_123-2".to_string(),
+            file_ref: "artifact:logs/output.txt".to_string(),
+            relative_path: None,
+        }];
 
         let downloads = tool
             .plan_downloads(root.path(), run, Some(&selected))
@@ -830,8 +651,8 @@ mod tests {
             .expect("plan selected file");
 
         assert_eq!(downloads.len(), 1);
-        assert_eq!(downloads[0].composite_run_id, "composite_123-2");
-        assert_eq!(downloads[0].artifact_path, "logs/output.txt");
+        assert_eq!(downloads[0].artifact.composite_run_id, "composite_123-2");
+        assert_eq!(downloads[0].artifact.filename, "logs/output.txt");
         assert!(
             downloads[0]
                 .destination
@@ -842,23 +663,13 @@ mod tests {
     #[tokio::test]
     async fn flattens_single_player_artifacts_by_default() {
         let root = tempfile::tempdir().expect("create destination root");
-        let config =
-            Config::new("secret".to_string(), "http://localhost:3000/api").expect("create config");
-        let tool = DownloadRunFilesTool::new(
-            config,
-            root.path().canonicalize().expect("canonicalize root"),
-        );
-        let run = RunDetails {
-            players: vec![RunPlayer {
-                id: "composite_123-1".to_string(),
-                player_number: 1,
-                artifacts: vec![RunArtifact {
-                    filename: "custom/attempts.json".to_string(),
-                    url: "https://example.com/attempts".to_string(),
-                    size: 1,
-                }],
-            }],
-        };
+        let tool = workspace_tool(root.path());
+        let run = manifest(vec![artifact(
+            "composite_123-1",
+            1,
+            "custom/attempts.json",
+            1,
+        )]);
 
         let downloads = tool
             .plan_downloads(root.path(), run, None)
@@ -872,30 +683,18 @@ mod tests {
     #[tokio::test]
     async fn uses_a_selected_file_relative_path_override_exactly() {
         let root = tempfile::tempdir().expect("create destination root");
-        let config =
-            Config::new("secret".to_string(), "http://localhost:3000/api").expect("create config");
-        let tool = DownloadRunFilesTool::new(
-            config,
-            root.path().canonicalize().expect("canonicalize root"),
-        );
-        let run = RunDetails {
-            players: vec![RunPlayer {
-                id: "composite_123-1".to_string(),
-                player_number: 1,
-                artifacts: vec![RunArtifact {
-                    filename: "custom/attempts.json".to_string(),
-                    url: "https://example.com/attempts".to_string(),
-                    size: 1,
-                }],
-            }],
-        };
-        let selected = HashMap::from([(
-            (
-                "composite_123-1".to_string(),
-                PathBuf::from("custom/attempts.json"),
-            ),
-            Some(PathBuf::from("attempts.json")),
+        let tool = workspace_tool(root.path());
+        let run = manifest(vec![artifact(
+            "composite_123-1",
+            1,
+            "custom/attempts.json",
+            1,
         )]);
+        let selected = [RunFileSelector::Selector {
+            run_id: "composite_123-1".to_string(),
+            file_ref: "artifact:custom/attempts.json".to_string(),
+            relative_path: Some("attempts.json".to_string()),
+        }];
 
         let downloads = tool
             .plan_downloads(root.path(), run, Some(&selected))
@@ -907,29 +706,195 @@ mod tests {
         assert!(!downloads[0].destination.ends_with("custom/attempts.json"));
     }
 
+    #[tokio::test]
+    async fn non_portable_storage_names_can_use_a_safe_output_alias() {
+        let root = tempfile::tempdir().expect("workspace");
+        let tool = workspace_tool(root.path());
+        let selectors = [RunFileSelector::Selector {
+            run_id: String::new(),
+            file_ref: "artifact:logs/output:stderr.txt".to_string(),
+            relative_path: Some("stderr.txt".to_string()),
+        }];
+        input::explicit_selectors(Some(&selectors)).expect("valid storage selector");
+        let downloads = tool
+            .plan_downloads(
+                root.path(),
+                manifest(vec![artifact("player-1", 1, "logs/output:stderr.txt", 7)]),
+                Some(&selectors),
+            )
+            .await
+            .expect("safe alias");
+        assert_eq!(downloads[0].destination, root.path().join("stderr.txt"));
+        assert!(
+            tool.plan_downloads(
+                root.path(),
+                manifest(vec![artifact("player-1", 1, "logs/output:stderr.txt", 7)]),
+                None,
+            )
+            .await
+            .is_err()
+        );
+        assert!(validate_artifact_path("../secret").is_err());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn finalization_uses_verified_bytes_when_the_temporary_name_is_replaced() {
+        use std::{io::Write as _, os::unix::fs::symlink};
+
+        let root = tempfile::tempdir().expect("workspace");
+        let outside = tempfile::NamedTempFile::new().expect("outside file");
+        fs::write(outside.path(), b"preserve me").expect("outside contents");
+        let mut temporary = tempfile::NamedTempFile::new_in(root.path()).expect("staging file");
+        temporary
+            .write_all(b"verified bytes")
+            .expect("verified contents");
+        fs::remove_file(temporary.path()).expect("replace staging name");
+        symlink(outside.path(), temporary.path()).expect("replacement symlink");
+        let destination = root.path().join("output.txt");
+
+        save_download(temporary.as_file_mut(), &destination)
+            .await
+            .expect("save verified handle");
+
+        assert!(
+            !fs::symlink_metadata(&destination)
+                .expect("output metadata")
+                .is_symlink()
+        );
+        assert_eq!(
+            fs::read(destination).expect("output contents"),
+            b"verified bytes"
+        );
+        assert_eq!(
+            fs::read(outside.path()).expect("outside contents"),
+            b"preserve me"
+        );
+    }
+
+    #[tokio::test]
+    async fn failed_finalization_removes_its_incomplete_output() {
+        let root = tempfile::tempdir().expect("workspace");
+        let source = root.path().join("source.txt");
+        fs::write(&source, b"content").expect("source contents");
+        let mut write_only = fs::OpenOptions::new()
+            .write(true)
+            .open(source)
+            .expect("write-only handle");
+        let destination = root.path().join("output.txt");
+        assert!(save_download(&mut write_only, &destination).await.is_err());
+        assert!(!destination.exists());
+    }
+
+    #[tokio::test]
+    async fn cancellation_during_finalization_removes_its_incomplete_output() {
+        use futures::FutureExt as _;
+        use std::io::Write as _;
+
+        let root = tempfile::tempdir().expect("workspace");
+        let mut verified = tempfile::tempfile_in(root.path()).expect("staging file");
+        verified
+            .write_all(b"verified bytes")
+            .expect("verified contents");
+        let destination = root.path().join("output.txt");
+        let mut save = Box::pin(save_download(&mut verified, &destination));
+        assert!(save.as_mut().now_or_never().is_none());
+        assert!(destination.exists());
+        drop(save);
+        assert!(!destination.exists());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn finalization_detects_replacement_of_the_output_path() {
+        use futures::FutureExt as _;
+        use std::{io::Write as _, os::unix::fs::symlink};
+
+        let root = tempfile::tempdir().expect("workspace");
+        let outside = tempfile::NamedTempFile::new().expect("outside file");
+        fs::write(outside.path(), b"preserve me").expect("outside contents");
+        let mut verified = tempfile::tempfile_in(root.path()).expect("staging file");
+        verified
+            .write_all(b"verified bytes")
+            .expect("verified contents");
+        let destination = root.path().join("output.txt");
+        let mut save = Box::pin(save_download(&mut verified, &destination));
+        assert!(save.as_mut().now_or_never().is_none());
+        fs::remove_file(&destination).expect("replace output name");
+        symlink(outside.path(), &destination).expect("replacement symlink");
+        save.await
+            .expect_err("replaced output must not be reported as downloaded");
+        assert!(
+            fs::symlink_metadata(&destination)
+                .expect("replacement preserved")
+                .is_symlink()
+        );
+        assert_eq!(
+            fs::read(outside.path()).expect("outside contents"),
+            b"preserve me"
+        );
+    }
+
+    #[tokio::test]
+    async fn planning_rejects_invalid_manifest_entries_and_output_collisions() {
+        let root = tempfile::tempdir().expect("workspace");
+        let tool = workspace_tool(root.path());
+        let mut unknown_player = manifest(vec![artifact("player-1", 1, "file.txt", 1)]);
+        unknown_player.players.clear();
+        let mut inconsistent_player = manifest(vec![artifact("player-1", 1, "file.txt", 1)]);
+        inconsistent_player.players[0].player_number = 2;
+        for manifest in [
+            unknown_player,
+            inconsistent_player,
+            manifest(vec![artifact("player-1", 1, "../escape", 1)]),
+            manifest(vec![
+                artifact("player-1", 1, "file.txt", 1),
+                artifact("player-1", 1, "file.txt", 1),
+            ]),
+        ] {
+            assert!(
+                tool.plan_downloads(root.path(), manifest, None)
+                    .await
+                    .is_err()
+            );
+        }
+        let files = manifest(vec![
+            artifact("player-1", 1, "a.txt", 1),
+            artifact("player-1", 1, "b.txt", 1),
+        ]);
+        let selectors: Vec<RunFileSelector> = serde_json::from_value(serde_json::json!([
+            {"file_ref":"artifact:a.txt", "relative_path":"same.txt"},
+            {"file_ref":"artifact:b.txt", "relative_path":"same.txt"},
+        ]))
+        .expect("selectors");
+        assert!(
+            tool.plan_downloads(root.path(), files, Some(&selectors))
+                .await
+                .is_err()
+        );
+        assert_eq!(fs::read_dir(root.path()).expect("workspace").count(), 0);
+    }
+
     #[test]
     fn selected_file_relative_paths_must_be_safe() {
         let input = DownloadRunFilesInput {
             project_id: "project_123".to_string(),
             run_id: "multiplayer_123".to_string(),
             destination_dir: "downloads".to_string(),
-            files: Some(vec![RunFileSelector {
+            files: Some(vec![RunFileSelector::Selector {
                 run_id: "composite_123-1".to_string(),
                 file_ref: "artifact:logs/output.txt".to_string(),
                 relative_path: Some("../attempts.json".to_string()),
             }]),
         };
 
-        assert!(requested_run_files(&input).is_err());
+        assert!(input::explicit_selectors(input.files.as_deref()).is_err());
     }
 
     #[tokio::test]
     async fn destination_is_created_inside_allowed_root() {
         let root = tempfile::tempdir().expect("create allowed root");
-        let tool = DownloadRunFilesTool::new(
-            Config::new("secret".to_string(), "http://localhost:3000/api").expect("create config"),
-            root.path().canonicalize().expect("canonicalize root"),
-        );
+        let tool = workspace_tool(root.path());
 
         let destination = tool
             .prepare_destination("downloads/run-1")
@@ -948,10 +913,7 @@ mod tests {
     #[tokio::test]
     async fn absolute_destination_with_missing_children_is_resolved_inside_allowed_root() {
         let root = tempfile::tempdir().expect("create allowed root");
-        let tool = DownloadRunFilesTool::new(
-            Config::new("secret".to_string(), "http://localhost:3000/api").expect("create config"),
-            root.path().canonicalize().expect("canonicalize root"),
-        );
+        let tool = workspace_tool(root.path());
         let requested = root.path().join("downloads/run-absolute");
 
         let destination = tool
@@ -975,18 +937,15 @@ mod tests {
         let root = tempfile::tempdir().expect("create allowed root");
         let outside = tempfile::tempdir().expect("create outside root");
         symlink(outside.path(), root.path().join("escape")).expect("create symlink");
-        let tool = DownloadRunFilesTool::new(
-            Config::new("secret".to_string(), "http://localhost:3000/api").expect("create config"),
-            root.path().canonicalize().expect("canonicalize root"),
-        );
+        let tool = workspace_tool(root.path());
 
         assert!(tool.prepare_destination("escape/downloads").await.is_err());
         assert!(!outside.path().join("downloads").exists());
     }
 
     #[tokio::test]
-    async fn downloads_run_artifacts_with_the_configured_credential() {
-        use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+    async fn a_run_link_alone_downloads_to_the_default_folder_without_leaking_credentials() {
+        use tokio::io::AsyncWriteExt as _;
 
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
             .await
@@ -997,35 +956,31 @@ mod tests {
             "players": [{
                 "id": "composite_1",
                 "player_number": 1,
-                "artifacts": [{
-                    "filename": "logs/output.txt",
-                    "url": artifact_url,
-                    "size": 7
-                }]
-            }]
+            }],
+            "files": [{ "composite_run_id": "composite_1", "player_number": 1,
+                "filename": "logs/output.txt", "download_url": artifact_url, "size_bytes": 7,
+                "etag": "\"v1\"", "expires_at_unix": 4_000_000_000_u64 }]
         })
         .to_string();
         let server = tokio::spawn(async move {
             for _ in 0..2 {
                 let (mut socket, _) = listener.accept().await.expect("accept request");
-                let mut request = vec![0_u8; 8192];
-                let read = socket.read(&mut request).await.expect("read request");
-                let request = String::from_utf8_lossy(&request[..read]);
-                assert!(
-                    request.to_ascii_lowercase().contains("x-api-key: secret"),
-                    "request did not contain the API key: {request}"
-                );
-                let (status, content_type, body) = if request
-                    .starts_with("GET /api/v1/project/project_123/runs/run_123 ")
-                {
+                let request = read_request(&mut socket).await;
+                let (status, content_type, body) = if request.starts_with(
+                    "POST /api/v1/project/project_123/runs/run_123/artifact-downloads ",
+                ) {
+                    assert!(request.to_ascii_lowercase().contains("x-api-key: secret"));
                     ("200 OK", "application/json", run_body.as_bytes())
                 } else if request.starts_with("GET /runs/composite_1/artifacts/logs/output.txt ") {
+                    assert!(!request.to_ascii_lowercase().contains("x-api-key"));
+                    assert!(!request.to_ascii_lowercase().contains("authorization:"));
+                    assert!(request.to_ascii_lowercase().contains("if-match: \"v1\""));
                     ("200 OK", "application/octet-stream", b"content".as_slice())
                 } else {
                     ("404 Not Found", "text/plain", b"not found".as_slice())
                 };
                 let headers = format!(
-                    "HTTP/1.1 {status}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                    "HTTP/1.1 {status}\r\nContent-Type: {content_type}\r\nETag: \"v1\"\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
                     body.len()
                 );
                 socket
@@ -1043,19 +998,22 @@ mod tests {
             root.path().canonicalize().expect("canonicalize root"),
         );
         let result = tool
-            .download(DownloadRunFilesInput {
-                project_id: "project_123".to_string(),
-                run_id: "run_123".to_string(),
-                destination_dir: "downloads".to_string(),
-                files: None,
-            })
+            .download(
+                serde_json::from_value(serde_json::json!({
+                    "run_id": format!("http://{address}/nexus/project_123/runs/c/run_123/details")
+                }))
+                .expect("link-only input"),
+            )
             .await
             .expect("download run files");
 
         server.await.expect("test server completes");
         assert_eq!(
-            std::fs::read(root.path().join("downloads/logs/output.txt"))
-                .expect("read downloaded artifact"),
+            std::fs::read(
+                root.path()
+                    .join("downloads/project_123/run_123/logs/output.txt")
+            )
+            .expect("read downloaded artifact"),
             b"content"
         );
         assert_eq!(
@@ -1065,8 +1023,177 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn download_does_not_follow_authenticated_redirects() {
-        use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+    async fn plain_filenames_download_only_matching_files_into_separate_player_folders() {
+        use tokio::io::AsyncWriteExt as _;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("listener");
+        let address = listener.local_addr().expect("address");
+        let manifest = serde_json::json!({
+            "players": [{"id": "player-1", "player_number": 1}, {"id": "player-2", "player_number": 2}],
+            "files": (["player-1", "player-2"].into_iter().enumerate().flat_map(|(i, id)| {
+                ["logs/output.txt", "other.txt"].map(|name| serde_json::json!({
+                    "composite_run_id": id, "player_number": i + 1, "filename": name,
+                    "size_bytes": 1, "etag": "\"v1\"", "expires_at_unix": 4_000_000_000_u64,
+                    "download_url": format!("http://{address}/{id}/{name}")
+                }))
+            }).collect::<Vec<_>>())
+        }).to_string();
+        let server = tokio::spawn(async move {
+            for _ in 0..3 {
+                let (mut socket, _) = listener.accept().await.expect("request");
+                let request = read_request(&mut socket).await;
+                let body = if request
+                    .starts_with("POST /api/v1/project/project-1/runs/run-1/artifact-downloads ")
+                {
+                    assert!(request.contains("artifact:logs/output.txt"));
+                    assert!(
+                        !request.contains("\"run_id\""),
+                        "filename selectors omit player IDs"
+                    );
+                    manifest.as_str()
+                } else {
+                    assert!(
+                        request.starts_with("GET /player-1/logs/output.txt ")
+                            || request.starts_with("GET /player-2/logs/output.txt ")
+                    );
+                    "x"
+                };
+                socket.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nETag: \"v1\"\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).as_bytes()).await.expect("response");
+            }
+        });
+        let root = tempfile::tempdir().expect("root");
+        let mut config =
+            Config::new("secret".to_string(), format!("http://{address}/api")).expect("config");
+        config.project_id = Some("project-1".to_string());
+        let tool =
+            DownloadRunFilesTool::new(config, root.path().canonicalize().expect("canonical root"));
+        let result = tool
+            .download(
+                serde_json::from_value(serde_json::json!({
+                    "run_id": "run-1", "files": ["logs/output.txt"]
+                }))
+                .expect("simple input"),
+            )
+            .await
+            .expect("download");
+        assert_eq!(
+            result.structured_content.expect("structured")["file_count"],
+            2
+        );
+        for player in [1, 2] {
+            let folder = root
+                .path()
+                .join(format!("downloads/project-1/run-1/player-{player}"));
+            assert_eq!(
+                std::fs::read(folder.join("logs/output.txt")).expect("file"),
+                b"x"
+            );
+            assert!(!folder.join("other.txt").exists());
+        }
+        server.await.expect("server");
+    }
+
+    #[tokio::test]
+    async fn failed_files_restart_from_scratch_without_redownloading_successful_files() {
+        use tokio::io::AsyncWriteExt as _;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("listener");
+        let address = listener.local_addr().expect("address");
+        let manifest = serde_json::json!({
+            "players": [{"id": "player-1", "player_number": 1}],
+            "files": (["good.txt", "missing.txt"].map(|filename| serde_json::json!({
+                "composite_run_id": "player-1", "player_number": 1, "filename": filename,
+                "size_bytes": 7, "etag": "\"v1\"", "expires_at_unix": 4_000_000_000_u64,
+                "download_url": format!("http://{address}/{filename}")
+            })))
+        })
+        .to_string();
+        let server = tokio::spawn(async move {
+            let mut successful_gets = 0;
+            let mut interrupted = false;
+            for _ in 0..5 {
+                let (mut socket, _) = listener.accept().await.expect("request");
+                let request = read_request(&mut socket).await;
+                let (body, length) = if request.starts_with("POST ") {
+                    (manifest.as_str(), manifest.len())
+                } else if request.starts_with("GET /good.txt ") {
+                    successful_gets += 1;
+                    ("content", 7)
+                } else {
+                    assert!(!request.to_ascii_lowercase().contains("range:"));
+                    if interrupted {
+                        ("content", 7)
+                    } else {
+                        interrupted = true;
+                        ("con", 7)
+                    }
+                };
+                socket.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nETag: \"v1\"\r\nContent-Length: {length}\r\nConnection: close\r\n\r\n{body}").as_bytes()).await.expect("response");
+            }
+            assert_eq!(
+                successful_gets, 1,
+                "retrying the failed file must preserve the successful file"
+            );
+        });
+        let root = tempfile::tempdir().expect("tempdir");
+        let tool = DownloadRunFilesTool::new(
+            Config::new("secret".to_string(), format!("http://{address}/api")).expect("config"),
+            root.path().canonicalize().expect("root"),
+        );
+        for attempt in 0..2 {
+            let result = tool
+                .download(DownloadRunFilesInput {
+                    project_id: "project-1".to_string(),
+                    run_id: "run-1".to_string(),
+                    destination_dir: "downloads".to_string(),
+                    files: (attempt == 1).then(|| {
+                        vec![RunFileSelector::Selector {
+                            run_id: String::new(),
+                            file_ref: "artifact:missing.txt".to_string(),
+                            relative_path: None,
+                        }]
+                    }),
+                })
+                .await
+                .expect("partial response");
+            let content = result.structured_content.expect("structured content");
+            assert_eq!(
+                content["status"],
+                if attempt == 0 {
+                    "partial"
+                } else {
+                    "downloaded"
+                }
+            );
+            assert_eq!(content["failed_count"], usize::from(attempt == 0));
+            assert_eq!(content["file_count"], 1);
+            assert_eq!(content["files"][0]["status"], "downloaded");
+            assert_eq!(
+                std::fs::read(root.path().join("downloads/good.txt")).expect("completed output"),
+                b"content"
+            );
+            let destination = root.path().join("downloads");
+            assert_eq!(
+                fs::read_dir(&destination)
+                    .expect("output directory")
+                    .count(),
+                attempt + 1
+            );
+            if attempt == 1 {
+                assert_eq!(
+                    fs::read(destination.join("missing.txt")).expect("retried file"),
+                    b"content"
+                );
+            }
+        }
+        server.await.expect("server");
+    }
+
+    #[tokio::test]
+    async fn signed_downloads_do_not_follow_redirects() {
+        use tokio::io::AsyncWriteExt as _;
 
         let redirect_target = tokio::net::TcpListener::bind("127.0.0.1:0")
             .await
@@ -1082,10 +1209,9 @@ mod tests {
             .expect("artifact server address");
         let source = tokio::spawn(async move {
             let (mut socket, _) = artifact_server.accept().await.expect("accept request");
-            let mut request = vec![0_u8; 4096];
-            let read = socket.read(&mut request).await.expect("read request");
-            let request = String::from_utf8_lossy(&request[..read]);
-            assert!(request.to_ascii_lowercase().contains("x-api-key: secret"));
+            let request = read_request(&mut socket).await;
+            assert!(!request.to_ascii_lowercase().contains("x-api-key"));
+            assert!(!request.to_ascii_lowercase().contains("authorization:"));
             socket
                 .write_all(
                     format!(
@@ -1104,18 +1230,16 @@ mod tests {
             .expect("create config"),
         )
         .expect("create client");
-        let root = tempfile::tempdir().expect("create destination root");
-
+        let mut temporary = tempfile::tempfile().expect("temporary file");
+        let mut artifact = artifact("player-1", 1, "artifact", 1);
+        artifact.download_url = format!("http://{artifact_address}/artifact");
         let result = client
-            .download_to_file(
-                &format!("http://{artifact_address}/artifact"),
-                &root.path().join("artifact"),
-            )
+            .download_signed_artifact(&artifact, &mut temporary)
             .await;
 
         source.await.expect("artifact server completes");
         assert!(result.is_err(), "redirect response must not be followed");
-        assert!(!root.path().join("artifact").exists());
+        assert_eq!(temporary.metadata().expect("metadata").len(), 0);
         assert!(
             tokio::time::timeout(
                 std::time::Duration::from_millis(100),
@@ -1128,60 +1252,107 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn cancellation_removes_partial_temporary_files() {
-        let root = tempfile::tempdir().expect("create destination root");
-        let temporary = root.path().join("artifact.part");
+    async fn existing_output_is_rejected_without_creating_temporary_files() {
+        let root = tempfile::tempdir().expect("workspace");
+        let destination = root.path().join("output.txt");
+        fs::write(&destination, b"existing").expect("existing output");
+        let client =
+            Client::new(Config::new("secret".to_string(), "http://localhost/api").expect("config"))
+                .expect("client");
         let download = PlannedDownload {
-            player_number: 1,
-            composite_run_id: "composite_1".to_string(),
-            artifact_path: "artifact".to_string(),
-            url: "https://example.com/artifact".to_string(),
-            expected_size: 1,
-            destination: root.path().join("artifact"),
-            temporary: temporary.clone(),
+            artifact: artifact("player-1", 1, "output.txt", 7),
+            destination: destination.clone(),
         };
-        let (created_tx, created_rx) = tokio::sync::oneshot::channel();
-        let task = tokio::spawn(async move {
-            let _cleanup = DownloadCleanup::new(&[download]);
-            tokio::fs::write(&temporary, b"partial")
-                .await
-                .expect("write partial file");
-            created_tx.send(()).expect("signal partial file creation");
-            std::future::pending::<()>().await;
-        });
-        created_rx.await.expect("wait for partial file");
-        let temporary = root.path().join("artifact.part");
-        assert!(temporary.exists());
-
-        task.abort();
-        let _ = task.await;
-
-        assert!(!temporary.exists());
+        let error = download_one(&client, &download)
+            .await
+            .expect_err("existing output");
+        assert!(error.to_string().contains("refusing to overwrite"));
+        assert_eq!(
+            fs::read(destination).expect("preserved output"),
+            b"existing"
+        );
+        assert_eq!(fs::read_dir(root.path()).expect("workspace").count(), 1);
     }
 
     #[tokio::test]
-    async fn copy_finalization_never_overwrites_an_existing_destination() {
-        let root = tempfile::tempdir().expect("create destination root");
-        let temporary = root.path().join("artifact.part");
-        let destination = root.path().join("artifact");
-        tokio::fs::write(&temporary, b"new")
-            .await
-            .expect("write temporary file");
-        tokio::fs::write(&destination, b"existing")
-            .await
-            .expect("write existing destination");
+    async fn output_created_during_the_request_is_preserved() {
+        use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 
-        let error = copy_without_overwrite(&temporary, &destination)
+        let root = tempfile::tempdir().expect("workspace");
+        let destination = root.path().join("output.txt");
+        let other_writer = destination.clone();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
             .await
-            .expect_err("existing destination must be preserved");
-
-        assert_eq!(error.kind(), std::io::ErrorKind::AlreadyExists);
+            .expect("listener");
+        let address = listener.local_addr().expect("address");
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.expect("request");
+            let mut bytes = [0; 4096];
+            assert!(socket.read(&mut bytes).await.expect("read") > 0);
+            fs::write(other_writer, b"existing").expect("concurrent output");
+            socket.write_all(b"HTTP/1.1 200 OK\r\nETag: \"v1\"\r\nContent-Length: 7\r\nConnection: close\r\n\r\ncontent").await.expect("response");
+        });
+        let client = Client::new(
+            Config::new("secret".to_string(), format!("http://{address}/api")).expect("config"),
+        )
+        .expect("client");
+        let mut artifact = artifact("player-1", 1, "output.txt", 7);
+        artifact.download_url = format!("http://{address}/file");
+        let download = PlannedDownload {
+            artifact,
+            destination: destination.clone(),
+        };
+        download_one(&client, &download)
+            .await
+            .expect_err("concurrent output must be preserved");
+        server.await.expect("server");
         assert_eq!(
-            tokio::fs::read(&destination)
-                .await
-                .expect("read destination"),
+            fs::read(destination).expect("preserved output"),
             b"existing"
         );
-        assert!(temporary.exists());
+        assert_eq!(fs::read_dir(root.path()).expect("workspace").count(), 1);
+    }
+
+    #[tokio::test]
+    async fn cancellation_removes_the_partial_file() {
+        use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+
+        let root = tempfile::tempdir().expect("workspace");
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("listener");
+        let address = listener.local_addr().expect("address");
+        let (started, response_started) = tokio::sync::oneshot::channel();
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.expect("request");
+            let mut bytes = [0; 4096];
+            assert!(socket.read(&mut bytes).await.expect("read") > 0);
+            socket
+                .write_all(b"HTTP/1.1 200 OK\r\nETag: \"v1\"\r\nContent-Length: 7\r\n\r\ncon")
+                .await
+                .expect("partial response");
+            started.send(()).expect("notify partial response");
+            std::future::pending::<()>().await;
+        });
+        let client = Client::new(
+            Config::new("secret".to_string(), format!("http://{address}/api")).expect("config"),
+        )
+        .expect("client");
+        let mut artifact = artifact("player-1", 1, "output.txt", 7);
+        artifact.download_url = format!("http://{address}/file");
+        let download = PlannedDownload {
+            artifact,
+            destination: root.path().join("output.txt"),
+        };
+        let task = tokio::spawn(async move { download_one(&client, &download).await });
+        tokio::time::timeout(std::time::Duration::from_secs(2), response_started)
+            .await
+            .expect("partial response timeout")
+            .expect("partial response started");
+        assert!(!task.is_finished());
+        task.abort();
+        let _ = task.await;
+        server.abort();
+        assert_eq!(fs::read_dir(root.path()).expect("workspace").count(), 0);
     }
 }

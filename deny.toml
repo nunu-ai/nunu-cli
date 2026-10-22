@@ -1,3 +1,14 @@
+[advisories]
+# keyring's Linux backend still requires zbus 5, which depends on these crates.
+# They were merged into zbus 6 and marked unmaintained as standalone crates.
+# Remove these exceptions once keyring's backend supports zbus 6.
+# https://github.com/z-galaxy/zbus/issues/2043
+ignore = [
+  "RUSTSEC-2026-0370", # zvariant
+  "RUSTSEC-2026-0371", # zbus_names
+  "RUSTSEC-2026-0372", # zvariant_derive
+]
+
 [licenses]
 allow = [
   "BSD-3-Clause",
