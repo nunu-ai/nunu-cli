@@ -30,7 +30,7 @@ pub fn login_command_for_mcp_url(mcp_url: &str) -> String {
     login_command(base_url)
 }
 
-/// Derive an API or MCP endpoint from a Nunu deployment base URL.
+/// Derive an API or MCP endpoint from a nunu deployment base URL.
 /// Localhost HTTP URLs are accepted for local development.
 ///
 /// # Errors
@@ -38,10 +38,10 @@ pub fn login_command_for_mcp_url(mcp_url: &str) -> String {
 /// Returns an error when the base URL is insecure, includes a path, or is not
 /// a valid absolute URL.
 pub fn endpoint_url(base_url: &str, endpoint: &str) -> Result<String> {
-    let mut url = oauth::parse_secure_url(base_url, "Nunu base URL")?;
+    let mut url = oauth::parse_secure_url(base_url, "nunu base URL")?;
     if !matches!(url.path(), "" | "/") || url.query().is_some() || url.fragment().is_some() {
         return Err(Error::ConfigError(
-            "Nunu base URL must contain only the scheme and host (for example, https://nunu.ai)"
+            "nunu base URL must contain only the scheme and host (for example, https://nunu.ai)"
                 .to_string(),
         ));
     }
@@ -104,7 +104,7 @@ pub async fn validate_mcp_credential(mcp_url: &str, credential: StoredCredential
 
     let status = response.status();
     Err(Error::AuthError(format!(
-        "The Nunu MCP rejected the credential with status {status}"
+        "The nunu MCP rejected the credential with status {status}"
     )))
 }
 

@@ -268,7 +268,7 @@ fn definition() -> Tool {
             "project_id": {
                 "type": "string",
                 "minLength": 1,
-                "description": "ID of the Nunu project that will receive the build."
+                "description": "ID of the nunu project that will receive the build."
             },
             "platform": {
                 "type": "string",
@@ -299,10 +299,10 @@ fn definition() -> Tool {
     });
     Tool::new(
         NAME,
-        "Upload one build artifact from the local filesystem to Nunu. The file must be inside the MCP server's working directory.",
+        "Upload one build artifact from the local filesystem to nunu. The file must be inside the MCP server's working directory.",
         input_schema.as_object().cloned().unwrap_or_default(),
     )
-    .with_title("Upload Nunu build")
+    .with_title("Upload nunu build")
     .with_raw_output_schema(Arc::new(
         output_schema.as_object().cloned().unwrap_or_default(),
     ))

@@ -52,7 +52,7 @@ impl std::fmt::Debug for UploadOptions {
     }
 }
 
-/// Upload a file to Nunu.ai
+/// Upload a file to nunu.ai
 ///
 /// # Errors
 ///

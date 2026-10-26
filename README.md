@@ -1,6 +1,6 @@
 # nunu-cli
 
-Upload build artifacts to [Nunu](https://nunu.ai) from your terminal or CI.
+Upload build artifacts to [nunu](https://nunu.ai) from your terminal or CI.
 
 ## Install
 
@@ -65,7 +65,7 @@ npm install --save-dev @nunu-ai/nunu-cli
 
 Store these values in your CI provider's secrets or variables:
 
-- `NUNU_API_KEY`: a Nunu API key
+- `NUNU_API_KEY`: a nunu API key
 - `NUNU_PROJECT_ID`: the project receiving the build
 
 Then upload with the local package:
@@ -83,7 +83,7 @@ GitHub Actions example:
     node-version: 20
     cache: npm
 - run: npm ci
-- name: Upload build to Nunu
+- name: Upload build to nunu
   env:
     NUNU_API_KEY: ${{ secrets.NUNU_API_KEY }}
     NUNU_PROJECT_ID: ${{ vars.NUNU_PROJECT_ID }}
@@ -112,7 +112,7 @@ For non-interactive use, set `NUNU_API_KEY` in the MCP server environment. Use
 client's working directory.
 
 `download_run_files` downloads selected artifacts or all artifacts from a run.
-Paste a full Nunu run link as `run_id`; the project is inferred and files go to
+Paste a full nunu run link as `run_id`; the project is inferred and files go to
 `downloads/<project>/<run>` inside the MCP workspace by default:
 
 ```json
@@ -150,7 +150,7 @@ manifests.
 
 - `NUNU_API_KEY`: API key for CI or other non-interactive use
 - `NUNU_PROJECT_ID`: default project ID
-- `NUNU_BASE_URL`: Nunu deployment URL; defaults to `https://nunu.ai`
+- `NUNU_BASE_URL`: nunu deployment URL; defaults to `https://nunu.ai`
 - `NUNU_WORKSPACE_ROOT`: allowed workspace root for local MCP file uploads and run artifact downloads
 
 The CLI also loads values from a local `.env` file.

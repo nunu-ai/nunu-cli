@@ -93,7 +93,7 @@ impl CredentialProvider {
         let credential = storage.load()?.ok_or_else(|| {
             Error::AuthError(
                 format!(
-                    "No Nunu credentials found. Run '{login_command}' before starting the MCP server, or set NUNU_API_KEY."
+                    "No nunu credentials found. Run '{login_command}' before starting the MCP server, or set NUNU_API_KEY."
                 ),
             )
         })?;

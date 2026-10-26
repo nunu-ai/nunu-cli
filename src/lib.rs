@@ -1,4 +1,4 @@
-//! Nunu CLI library for uploading build artifacts
+//! nunu CLI library for uploading build artifacts
 
 pub mod ci_metadata;
 pub mod config;

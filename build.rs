@@ -10,10 +10,10 @@ fn main() {
     // Get version from Cargo.toml
     let version = env!("CARGO_PKG_VERSION");
 
-    res.set("ProductName", "Nunu CLI")
-        .set("FileDescription", "Build artifact upload tool for Nunu.ai")
-        .set("CompanyName", "Nunu.ai")
-        .set("LegalCopyright", "Copyright (C) 2025 Nunu.ai")
+    res.set("ProductName", "nunu CLI")
+        .set("FileDescription", "Build artifact upload tool for nunu.ai")
+        .set("CompanyName", "nunu.ai")
+        .set("LegalCopyright", "Copyright (C) 2025 nunu.ai")
         .set("OriginalFilename", "nunu-cli.exe")
         .set("FileVersion", version)
         .set("ProductVersion", version);

@@ -227,7 +227,7 @@ impl LocalTool for WaitForTool {
         let result = match self.wait(input).await {
             Ok(result) => result,
             Err(error) => CallToolResult::error(vec![ContentBlock::text(format!(
-                "Waiting for Nunu execution failed: {error}"
+                "Waiting for nunu execution failed: {error}"
             ))]),
         };
         Ok(result.into())
@@ -307,7 +307,7 @@ fn definition() -> Tool {
             "project_id": {
                 "type": "string",
                 "minLength": 1,
-                "description": "ID of the Nunu project containing the job, run, or test plan execution."
+                "description": "ID of the nunu project containing the job, run, or test plan execution."
             },
             "job_id": {
                 "type": "string",
@@ -361,7 +361,7 @@ fn definition() -> Tool {
     });
     Tool::new(
         NAME,
-        "Wait for a Nunu job, run, or test plan execution to complete by polling its status. Returns the final resource or the latest resource when the hard timeout is reached.",
+        "Wait for a nunu job, run, or test plan execution to complete by polling its status. Returns the final resource or the latest resource when the hard timeout is reached.",
         input_schema.as_object().cloned().unwrap_or_default(),
     )
     .with_title("Wait for completion")

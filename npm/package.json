@@ -1,7 +1,7 @@
 {
   "name": "@nunu-ai/nunu-cli",
   "version": "0.1.20",
-  "description": "CLI and local MCP server for Nunu.ai",
+  "description": "CLI and local MCP server for nunu.ai",
   "homepage": "https://nunu.ai",
   "repository": {
     "type": "git",

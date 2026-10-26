@@ -87,7 +87,7 @@ pub struct CredentialStorage {
 }
 
 impl CredentialStorage {
-    /// Locate the operating-system-specific Nunu configuration directory.
+    /// Locate the operating-system-specific nunu configuration directory.
     ///
     /// # Errors
     ///

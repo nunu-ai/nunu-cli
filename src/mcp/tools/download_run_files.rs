@@ -38,7 +38,7 @@ struct DownloadRunFilesInput {
     /// Optional project ID. Inferred from the run link, configuration, or `inspect_run`.
     #[serde(default)]
     project_id: String,
-    /// Nunu run link or multiplayer/composite run ID from `list_runs` or `inspect_run`.
+    /// nunu run link or multiplayer/composite run ID from `list_runs` or `inspect_run`.
     #[serde(default)]
     #[schemars(!default, length(min = 1))]
     run_id: String,
@@ -457,11 +457,11 @@ async fn prepare_directory(root: &Path, requested: &Path) -> Result<PathBuf> {
 
 fn definition() -> Tool {
     let mut tool = Tool::new(NAME,
-        "Download a Nunu run's files into the workspace. A run link or run ID is enough. Multiple players get separate player-<number> folders. Existing paths return per-file errors and are preserved; use files to retry failed downloads from the beginning.",
+        "Download a nunu run's files into the workspace. A run link or run ID is enough. Multiple players get separate player-<number> folders. Existing paths return per-file errors and are preserved; use files to retry failed downloads from the beginning.",
         JsonObject::new())
         .with_input_schema::<DownloadRunFilesInput>()
         .with_output_schema::<DownloadReport>()
-        .with_title("Download Nunu run files")
+        .with_title("Download nunu run files")
         .with_annotations(ToolAnnotations::new().read_only(false).destructive(false).idempotent(true).open_world(true));
     // Serde accepts the legacy alias; expose it in the advertised schema too.
     if let Some(properties) = Arc::make_mut(&mut tool.input_schema)

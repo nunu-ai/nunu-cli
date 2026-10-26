@@ -35,14 +35,14 @@ struct UploadMetadata {
 
 #[derive(Parser)]
 #[command(name = "nunu-cli")]
-#[command(about = "Upload build artifacts to Nunu.ai", long_about = None)]
+#[command(about = "Upload build artifacts to nunu.ai", long_about = None)]
 #[command(version)]
 struct Cli {
     /// Enable verbose output (shows all logs)
     #[arg(short, long, global = true, action = clap::ArgAction::Count)]
     verbose: u8,
 
-    /// Nunu deployment base URL
+    /// nunu deployment base URL
     #[arg(long, global = true, env = "NUNU_BASE_URL", default_value = DEFAULT_BASE_URL)]
     base_url: String,
 
@@ -52,7 +52,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Run the local Nunu MCP server over stdin/stdout
+    /// Run the local nunu MCP server over stdin/stdout
     Mcp {
         /// API token for authentication (legacy alias for --api-key)
         #[arg(long, env = "NUNU_API_TOKEN", hide = true)]
@@ -743,7 +743,7 @@ async fn main() -> Result<()> {
                     let mcp_url = endpoint_url(&cli.base_url, "mcp")?;
 
                     let credential = if api_key {
-                        print!("Enter your Nunu API key: ");
+                        print!("Enter your nunu API key: ");
                         std::io::stdout().flush()?;
                         let entered_api_key = rpassword::read_password()?;
                         if entered_api_key.trim().is_empty() {
@@ -770,7 +770,7 @@ async fn main() -> Result<()> {
                         oauth @ StoredCredential::OAuth(_) => storage.save(&oauth)?,
                     };
 
-                    println!("You're authenticated and ready to use Nunu.");
+                    println!("You're authenticated and ready to use nunu.");
                     if used_file_fallback {
                         eprintln!(
                             "Warning: the operating-system credential store was unavailable; credentials were saved to {} with user-only permissions.",
@@ -812,7 +812,7 @@ async fn main() -> Result<()> {
                 }
                 AuthCommands::Logout => {
                     storage.delete()?;
-                    println!("Logged out. Local Nunu credentials were removed.");
+                    println!("Logged out. Local nunu credentials were removed.");
                     Ok(String::new())
                 }
             }

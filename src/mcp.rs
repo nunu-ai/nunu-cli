@@ -123,10 +123,10 @@ fn upstream_startup_error(
 ) -> anyhow::Error {
     if error.is_authorization_required() {
         anyhow::anyhow!(
-            "Nunu MCP authentication is required. Run '{login_command}' and restart your MCP client, or set NUNU_API_KEY."
+            "nunu MCP authentication is required. Run '{login_command}' and restart your MCP client, or set NUNU_API_KEY."
         )
     } else {
-        anyhow::Error::new(error).context("failed to connect to the Nunu MCP")
+        anyhow::Error::new(error).context("failed to connect to the nunu MCP")
     }
 }
 
@@ -312,9 +312,9 @@ impl ServerHandler for ProxyServer {
         ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
             .with_server_info(
                 Implementation::new("nunu-cli", env!("CARGO_PKG_VERSION"))
-                    .with_title("Nunu MCP proxy"),
+                    .with_title("nunu MCP proxy"),
             )
-            .with_instructions("Nunu cloud tools proxied through the local CLI over stdin/stdout.")
+            .with_instructions("nunu cloud tools proxied through the local CLI over stdin/stdout.")
     }
 
     fn list_tools(
@@ -349,7 +349,7 @@ impl ServerHandler for ProxyServer {
     }
 }
 
-/// Run the local stdio MCP server and proxy tools from the configured Nunu MCP.
+/// Run the local stdio MCP server and proxy tools from the configured nunu MCP.
 ///
 /// # Errors
 ///
@@ -385,7 +385,7 @@ pub async fn serve_stdio(
     let remote_tools = upstream
         .list_all_tools()
         .await
-        .context("failed to list Nunu MCP tools")?;
+        .context("failed to list nunu MCP tools")?;
     let local_tools = Arc::new(LocalToolRegistry::standard(
         upload_config,
         allowed_root,
@@ -640,7 +640,7 @@ mod tests {
 
         assert_eq!(
             format!("{error:#}"),
-            "failed to connect to the Nunu MCP: connection closed: initialize response"
+            "failed to connect to the nunu MCP: connection closed: initialize response"
         );
     }
 }

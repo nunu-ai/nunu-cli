@@ -29,10 +29,10 @@ async fn resolve_project(upstream: &Peer<RoleClient>, run_id: &str) -> Result<St
         upstream.call_tool_once(request),
     )
     .await
-    .context("project lookup timed out; try a full Nunu run link")?
-    .context("project lookup failed; try a full Nunu run link")?;
+    .context("project lookup timed out; try a full nunu run link")?
+    .context("project lookup failed; try a full nunu run link")?;
     let CallToolResponse::Complete(result) = response else {
-        anyhow::bail!("project lookup did not complete; try a full Nunu run link");
+        anyhow::bail!("project lookup did not complete; try a full nunu run link");
     };
     project_from_inspection(&result)
 }
@@ -40,7 +40,7 @@ async fn resolve_project(upstream: &Peer<RoleClient>, run_id: &str) -> Result<St
 fn project_from_inspection(result: &CallToolResult) -> Result<String> {
     anyhow::ensure!(
         result.is_error != Some(true),
-        "run inspection failed; check access or provide a full Nunu run link"
+        "run inspection failed; check access or provide a full nunu run link"
     );
     let project = result
         .structured_content
@@ -58,7 +58,7 @@ fn project_from_inspection(result: &CallToolResult) -> Result<String> {
                 })
         });
     project.filter(|id| valid_id(id)).context(
-        "project lookup returned no valid project; provide a full Nunu run link or project_id",
+        "project lookup returned no valid project; provide a full nunu run link or project_id",
     )
 }
 
@@ -71,16 +71,16 @@ pub(super) async fn resolve(
     input.project_id = input.project_id.trim().to_string();
     anyhow::ensure!(
         !input.run_id.is_empty(),
-        "Which run should be downloaded? Provide a Nunu run link or an ID from list_runs or inspect_run."
+        "Which run should be downloaded? Provide a nunu run link or an ID from list_runs or inspect_run."
     );
     if input.run_id.contains("://") || input.run_id.starts_with('/') {
         let api = Url::parse(&config.api_url)?;
-        let link = api.join(&input.run_id).context("invalid Nunu run link")?;
+        let link = api.join(&input.run_id).context("invalid nunu run link")?;
         anyhow::ensure!(
             link.origin() == api.origin()
                 && link.username().is_empty()
                 && link.password().is_none(),
-            "the run link must belong to the configured Nunu deployment"
+            "the run link must belong to the configured nunu deployment"
         );
         let segments: Vec<_> = link.path_segments().context("invalid run link")?.collect();
         let (project, run) = match segments.as_slice() {
@@ -116,7 +116,7 @@ pub(super) async fn resolve(
     }
     anyhow::ensure!(
         valid_id(&input.project_id),
-        "Provide a full Nunu run link, a valid project_id, or configure NUNU_PROJECT_ID"
+        "Provide a full nunu run link, a valid project_id, or configure NUNU_PROJECT_ID"
     );
     if input.destination_dir.trim().is_empty() {
         input.destination_dir = format!("downloads/{}/{}", input.project_id, input.run_id);
@@ -384,7 +384,7 @@ mod tests {
                 .await
                 .expect_err("project")
                 .to_string()
-                .contains("full Nunu run link")
+                .contains("full nunu run link")
         );
         for value in [
             serde_json::json!({"run_id": "https://other.test/nexus/p/runs/c/r"}),

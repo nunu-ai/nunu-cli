@@ -1,7 +1,7 @@
 {
   "name": "@nunu-ai/nunu-cli-linux-x64",
   "version": "0.1.20",
-  "description": "Nunu CLI native binary for Linux x64",
+  "description": "nunu CLI native binary for Linux x64",
   "repository": {
     "type": "git",
     "url": "https://github.com/nunu-ai/nunu-cli.git"
