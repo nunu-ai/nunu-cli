@@ -17,7 +17,6 @@ allow = [
   "Apache-2.0",
   "Unicode-3.0",
   "CDLA-Permissive-2.0",
-  "Zlib",
   "Apache-2.0 WITH LLVM-exception",
   "MPL-2.0",
 ]
