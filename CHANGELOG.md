@@ -1,8 +1,15 @@
 # Changelog
 
-## [v0.1.31](https://github.com/nunu-ai/nunu-cli/compare/v0.1.30...18abc65b84028608b03b3aa822a1ccfc30301138) (2026-10-22)
+## [v0.1.32](https://github.com/nunu-ai/nunu-cli/compare/v0.1.31...75973ccaa5c269a071fe7ad2d02ff3377604f3a1) (2026-10-26)
 
-### Features
+### Fixes
+
+* correct stylization of 'nunu'
+([75973cc](https://github.com/nunu-ai/nunu-cli/commit/75973ccaa5c269a071fe7ad2d02ff3377604f3a1))
+
+### [v0.1.31](https://github.com/nunu-ai/nunu-cli/compare/v0.1.30...v0.1.31) (2026-10-22)
+
+#### Features
 
 * improve artifact download
 ([18abc65](https://github.com/nunu-ai/nunu-cli/commit/18abc65b84028608b03b3aa822a1ccfc30301138))
