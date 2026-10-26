@@ -32,18 +32,22 @@ impl LocalToolRegistry {
         config: Config,
         allowed_root: PathBuf,
         upstream: Peer<RoleClient>,
+        readonly: bool,
     ) -> Self {
-        Self::new([
+        let mut tools: Vec<Arc<dyn LocalTool>> = vec![
             Arc::new(
                 download_run_files::DownloadRunFilesTool::new(config.clone(), allowed_root.clone())
                     .with_upstream(upstream),
-            ) as Arc<dyn LocalTool>,
-            Arc::new(upload_build::UploadBuildTool::new(
-                config.clone(),
+            ),
+            Arc::new(wait_for::WaitForTool::new(config.clone())),
+        ];
+        if !readonly {
+            tools.push(Arc::new(upload_build::UploadBuildTool::new(
+                config,
                 allowed_root,
-            )) as Arc<dyn LocalTool>,
-            Arc::new(wait_for::WaitForTool::new(config)) as Arc<dyn LocalTool>,
-        ])
+            )));
+        }
+        Self::new(tools)
     }
 
     fn new(tools: impl IntoIterator<Item = Arc<dyn LocalTool>>) -> Self {

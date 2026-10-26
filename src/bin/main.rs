@@ -54,6 +54,10 @@ struct Cli {
 enum Commands {
     /// Run the local nunu MCP server over stdin/stdout
     Mcp {
+        /// Use the read-only MCP endpoint and omit local tools that modify Nunu
+        #[arg(long, alias = "read-only")]
+        readonly: bool,
+
         /// API token for authentication (legacy alias for --api-key)
         #[arg(long, env = "NUNU_API_TOKEN", hide = true)]
         token: Option<String>,
@@ -295,11 +299,13 @@ async fn main() -> Result<()> {
 
     let result: Result<String> = match cli.command {
         Commands::Mcp {
+            readonly,
             token,
             api_key,
             workspace_root,
         } => {
-            let mcp_url = endpoint_url(&cli.base_url, "mcp")?;
+            let mcp_url =
+                endpoint_url(&cli.base_url, if readonly { "mcp/readonly" } else { "mcp" })?;
             let api_url = endpoint_url(&cli.base_url, "api")?;
             let login_command = login_command(&cli.base_url);
             let credential = if let Some(api_key) = api_key.or(token) {

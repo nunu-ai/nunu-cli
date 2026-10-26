@@ -350,6 +350,7 @@ impl ServerHandler for ProxyServer {
 }
 
 /// Run the local stdio MCP server and proxy tools from the configured nunu MCP.
+/// The `/mcp/readonly` endpoint controls its own remote tool set and omits local uploads.
 ///
 /// # Errors
 ///
@@ -368,6 +369,7 @@ pub async fn serve_stdio(
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty());
     let upload_config = Config::with_credential(credential.clone(), api_url, default_project)?;
+    let readonly = url::Url::parse(mcp_url)?.path().trim_end_matches('/') == "/mcp/readonly";
     let client = AuthenticatedHttpClient::new(credential)?;
     let transport = StreamableHttpClientTransport::with_client(
         client,
@@ -390,9 +392,9 @@ pub async fn serve_stdio(
         upload_config,
         allowed_root,
         upstream.peer().clone(),
+        readonly,
     ));
     let tools = local_tools.merged_with(remote_tools);
-
     let proxy = ProxyServer {
         upstream: upstream.peer().clone(),
         tools: Arc::new(tools),
@@ -451,7 +453,9 @@ mod tests {
     const DOWNLOAD_RUN_FILES_TOOL: &str = "download_run_files";
     const WAIT_FOR_COMPLETION_TOOL: &str = "wait_for_completion";
     #[derive(Clone)]
-    struct EchoServer;
+    struct EchoServer {
+        readonly: bool,
+    }
 
     impl ServerHandler for EchoServer {
         fn get_info(&self) -> ServerInfo {
@@ -469,19 +473,22 @@ mod tests {
                 "type".to_string(),
                 serde_json::Value::String("object".to_string()),
             );
-            std::future::ready(Ok(ListToolsResult::with_all_items(vec![
-                Tool::new("echo", "Echo a remote response", schema.clone()),
-                Tool::new(
-                    UPLOAD_BUILD_TOOL,
-                    "Remote upload placeholder",
-                    schema.clone(),
-                ),
-                Tool::new(
-                    DOWNLOAD_RUN_FILES_TOOL,
-                    "Remote ZIP download placeholder",
-                    schema,
-                ),
-            ])))
+            let mut tools = vec![Tool::new("echo", "Echo a remote response", schema.clone())];
+            if !self.readonly {
+                tools.extend([
+                    Tool::new(
+                        UPLOAD_BUILD_TOOL,
+                        "Remote upload placeholder",
+                        schema.clone(),
+                    ),
+                    Tool::new(
+                        DOWNLOAD_RUN_FILES_TOOL,
+                        "Remote ZIP download placeholder",
+                        schema,
+                    ),
+                ]);
+            }
+            std::future::ready(Ok(ListToolsResult::with_all_items(tools)))
         }
 
         async fn call_tool(
@@ -489,6 +496,12 @@ mod tests {
             request: CallToolRequestParams,
             _context: RequestContext<rmcp::RoleServer>,
         ) -> std::result::Result<CallToolResponse, rmcp::ErrorData> {
+            if self.readonly && request.name != "echo" {
+                return Err(rmcp::ErrorData::invalid_params(
+                    format!("Tool {} not found", request.name),
+                    None,
+                ));
+            }
             Ok(CallToolResult::success(vec![ContentBlock::text(format!(
                 "remote:{}",
                 request.name
@@ -505,7 +518,7 @@ mod tests {
         let (upstream_server_read, upstream_server_write) = tokio::io::split(upstream_server_io);
 
         let (remote_server, upstream) = tokio::join!(
-            EchoServer.serve((upstream_server_read, upstream_server_write)),
+            EchoServer { readonly: false }.serve((upstream_server_read, upstream_server_write)),
             ClientInfo::new(
                 ClientCapabilities::default(),
                 Implementation::new("proxy-test", "1"),
@@ -525,6 +538,7 @@ mod tests {
             config,
             root.path().canonicalize().expect("canonicalize root"),
             upstream.peer().clone(),
+            false,
         ));
         let tools = local_tools.merged_with(tools);
         let proxy = ProxyServer {
@@ -615,6 +629,108 @@ mod tests {
         host.close().await.expect("close host");
         proxy_server.close().await.expect("close proxy");
         upstream.close().await.expect("close upstream");
+    }
+
+    #[tokio::test]
+    async fn readonly_proxy_keeps_local_read_tools_and_forwards_remote_policy() {
+        let (upstream_client_io, upstream_server_io) = tokio::io::duplex(64 * 1024);
+        let (remote_server, upstream) = tokio::join!(
+            EchoServer { readonly: true }.serve(tokio::io::split(upstream_server_io)),
+            ClientInfo::new(
+                ClientCapabilities::default(),
+                Implementation::new("proxy-test", "1"),
+            )
+            .serve(tokio::io::split(upstream_client_io))
+        );
+        let mut remote_server = remote_server.expect("start remote server");
+        let mut upstream = upstream.expect("connect upstream client");
+        let tools = upstream
+            .list_all_tools()
+            .await
+            .expect("list upstream tools");
+        let root = tempfile::tempdir().expect("create allowed root");
+        let config =
+            Config::new("secret".to_string(), "http://localhost:3000/api").expect("create config");
+        let local_tools = Arc::new(LocalToolRegistry::standard(
+            config,
+            root.path().canonicalize().expect("canonicalize root"),
+            upstream.peer().clone(),
+            true,
+        ));
+        let proxy = ProxyServer {
+            upstream: upstream.peer().clone(),
+            tools: Arc::new(local_tools.merged_with(tools)),
+            local_tools,
+        };
+
+        let (host_io, proxy_io) = tokio::io::duplex(64 * 1024);
+        let (proxy_server, host) = tokio::join!(
+            proxy.serve(tokio::io::split(proxy_io)),
+            ClientInfo::new(
+                ClientCapabilities::default(),
+                Implementation::new("host-test", "1"),
+            )
+            .serve(tokio::io::split(host_io))
+        );
+        let mut proxy_server = proxy_server.expect("start proxy server");
+        let mut host = host.expect("connect host client");
+
+        let proxied_tools = host.list_all_tools().await.expect("list read-only tools");
+        assert_eq!(
+            proxied_tools
+                .iter()
+                .map(|tool| tool.name.as_ref())
+                .collect::<Vec<_>>(),
+            [DOWNLOAD_RUN_FILES_TOOL, "echo", WAIT_FOR_COMPLETION_TOOL]
+        );
+
+        let response = host
+            .call_tool_once(CallToolRequestParams::new("echo"))
+            .await
+            .expect("call remote tool without annotations");
+        let CallToolResponse::Complete(result) = response else {
+            panic!("expected a complete tool response");
+        };
+        assert_eq!(
+            result.content[0].as_text().expect("text").text,
+            "remote:echo"
+        );
+
+        let response = host
+            .call_tool_once(CallToolRequestParams::new(DOWNLOAD_RUN_FILES_TOOL))
+            .await
+            .expect("local download handles missing run");
+        let CallToolResponse::Complete(result) = response else {
+            panic!("expected a complete download response");
+        };
+        assert!(
+            result.content[0]
+                .as_text()
+                .expect("text")
+                .text
+                .contains("Which run")
+        );
+
+        let error = host
+            .call_tool_once(CallToolRequestParams::new(WAIT_FOR_COMPLETION_TOOL))
+            .await
+            .expect_err("local wait handler validates input");
+        assert!(
+            matches!(error, ServiceError::McpError(error) if error.message.contains("invalid wait_for_completion arguments"))
+        );
+
+        let error = host
+            .call_tool_once(CallToolRequestParams::new(UPLOAD_BUILD_TOOL))
+            .await
+            .expect_err("upload is rejected by the read-only upstream");
+        assert!(
+            matches!(error, ServiceError::McpError(error) if error.message == "Tool upload_build not found")
+        );
+
+        host.close().await.expect("close host");
+        proxy_server.close().await.expect("close proxy");
+        upstream.close().await.expect("close upstream");
+        remote_server.close().await.expect("close remote server");
     }
 
     #[test]

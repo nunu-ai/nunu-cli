@@ -120,18 +120,23 @@ impl CredentialProvider {
         })
     }
 
-    /// Check that saved OAuth credentials belong to this exact MCP resource.
+    /// Check that saved OAuth credentials belong to this MCP resource.
+    /// A deployment's full MCP credential also works on its read-only endpoint.
     ///
     /// # Errors
     /// Returns an error for invalid URLs or a different deployment/resource.
     pub fn validate_mcp_destination(&self, mcp_url: &str) -> Result<()> {
         if let Some(resource) = &self.oauth_resource {
             let saved = crate::auth::oauth::parse_secure_url(resource, "Saved MCP resource")?;
-            let destination = crate::auth::oauth::parse_secure_url(mcp_url, "MCP destination")?;
+            let mut destination = crate::auth::oauth::parse_secure_url(mcp_url, "MCP destination")?;
+            if saved.path() == "/mcp" && destination.path() == "/mcp/readonly" {
+                destination.set_path("/mcp");
+            }
             if saved != destination {
-                return Err(Error::AuthError(
-                    "Saved OAuth credentials belong to a different MCP resource. Log in to the selected deployment.".to_string(),
-                ));
+                return Err(Error::AuthError(format!(
+                    "Saved OAuth credentials belong to a different MCP resource. Run '{}' to log in to the selected endpoint.",
+                    crate::auth::login_command_for_mcp_url(mcp_url)
+                )));
             }
         }
         Ok(())
@@ -268,7 +273,8 @@ impl CredentialProvider {
         match (&*state, &latest) {
             (StoredCredential::OAuth(current), StoredCredential::OAuth(latest))
                 if current.client_id == latest.client_id
-                    && current.token_endpoint == latest.token_endpoint =>
+                    && current.token_endpoint == latest.token_endpoint
+                    && current.mcp_url == latest.mcp_url =>
             {
                 self.validate_mcp_destination(&latest.mcp_url)?;
             }
@@ -360,6 +366,11 @@ mod tests {
         );
         assert!(
             provider
+                .validate_mcp_destination("https://nunu.ai/mcp/readonly")
+                .is_ok()
+        );
+        assert!(
+            provider
                 .validate_api_destination("https://nunu.ai/api/")
                 .is_ok()
         );
@@ -368,6 +379,10 @@ mod tests {
             "https://nunu.ai:8443/mcp",
             "http://localhost/mcp",
             "https://nunu.ai/other",
+            "https://other.example/mcp/readonly",
+            "https://nunu.ai:8443/mcp/readonly",
+            "https://nunu.ai/mcp/readonly?other",
+            "https://nunu.ai/mcp/readonly#other",
             "https://nunu.ai/mcp?other",
             "https://nunu.ai/mcp#other",
         ] {
@@ -386,6 +401,32 @@ mod tests {
                     .is_err()
             );
         }
+    }
+
+    #[test]
+    fn readonly_oauth_cannot_be_used_for_full_mcp_or_local_api_tools() {
+        let StoredCredential::OAuth(mut credential) = oauth_credential() else {
+            unreachable!()
+        };
+        credential.mcp_url = "https://nunu.ai/mcp/readonly".to_string();
+        let provider =
+            CredentialProvider::from_credential(StoredCredential::OAuth(credential), None)
+                .expect("provider");
+        assert!(
+            provider
+                .validate_mcp_destination("https://nunu.ai/mcp/readonly")
+                .is_ok()
+        );
+        let error = provider
+            .validate_mcp_destination("https://nunu.ai/mcp")
+            .expect_err("read-only OAuth cannot authorize full MCP");
+        assert!(error.to_string().contains(LOGIN_COMMAND));
+        assert!(!error.to_string().contains("--readonly"));
+        assert!(
+            provider
+                .validate_api_destination("https://nunu.ai/api")
+                .is_err()
+        );
     }
 
     #[tokio::test]
@@ -407,30 +448,32 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn refresh_rejects_a_login_to_another_deployment() {
-        let directory = tempfile::tempdir().expect("directory");
-        let storage = CredentialStorage::file_only(directory.path().to_path_buf());
-        storage.save(&oauth_credential()).expect("save");
-        let provider = CredentialProvider::load(storage.clone()).expect("provider");
-        let StoredCredential::OAuth(mut replacement) = oauth_credential() else {
-            unreachable!()
-        };
-        replacement.mcp_url = "https://other.example/mcp".to_string();
-        replacement.access_token = "other-access".to_string();
-        replacement.expires_at = unix_timestamp() + 3600;
-        storage
-            .save(&StoredCredential::OAuth(replacement))
-            .expect("new login");
-        assert!(provider.header().await.is_err());
-        assert!(
-            provider
-                .refresh_after_unauthorized("old-access")
-                .await
-                .is_err()
-        );
-        assert!(
-            matches!(storage.load().expect("load"), Some(StoredCredential::OAuth(oauth)) if oauth.access_token == "other-access")
-        );
+    async fn refresh_rejects_a_login_to_another_resource() {
+        for resource in ["https://other.example/mcp", "https://nunu.ai/mcp/readonly"] {
+            let directory = tempfile::tempdir().expect("directory");
+            let storage = CredentialStorage::file_only(directory.path().to_path_buf());
+            storage.save(&oauth_credential()).expect("save");
+            let provider = CredentialProvider::load(storage.clone()).expect("provider");
+            let StoredCredential::OAuth(mut replacement) = oauth_credential() else {
+                unreachable!()
+            };
+            replacement.mcp_url = resource.to_string();
+            replacement.access_token = "other-access".to_string();
+            replacement.expires_at = unix_timestamp() + 3600;
+            storage
+                .save(&StoredCredential::OAuth(replacement))
+                .expect("new login");
+            assert!(provider.header().await.is_err());
+            assert!(
+                provider
+                    .refresh_after_unauthorized("old-access")
+                    .await
+                    .is_err()
+            );
+            assert!(
+                matches!(storage.load().expect("load"), Some(StoredCredential::OAuth(oauth)) if oauth.access_token == "other-access")
+            );
+        }
     }
 
     #[tokio::test]

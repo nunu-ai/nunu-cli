@@ -26,7 +26,10 @@ pub fn login_command(base_url: &str) -> String {
 
 #[must_use]
 pub fn login_command_for_mcp_url(mcp_url: &str) -> String {
-    let base_url = mcp_url.strip_suffix("/mcp").unwrap_or(DEFAULT_BASE_URL);
+    let base_url = mcp_url
+        .strip_suffix("/mcp/readonly")
+        .or_else(|| mcp_url.strip_suffix("/mcp"))
+        .unwrap_or(DEFAULT_BASE_URL);
     login_command(base_url)
 }
 
@@ -122,6 +125,10 @@ mod tests {
             endpoint_url("http://localhost:3000", "/mcp/").expect("local MCP URL"),
             "http://localhost:3000/mcp"
         );
+        assert_eq!(
+            endpoint_url("https://nunu.ai/", "mcp/readonly").expect("read-only MCP URL"),
+            "https://nunu.ai/mcp/readonly"
+        );
     }
 
     #[test]
@@ -140,6 +147,14 @@ mod tests {
         assert_eq!(
             login_command_for_mcp_url("https://staging.nunu.ai/mcp"),
             "npx --yes @nunu-ai/nunu-cli auth login --base-url 'https://staging.nunu.ai'"
+        );
+        assert_eq!(
+            login_command_for_mcp_url("https://nunu.ai/mcp/readonly"),
+            LOGIN_COMMAND
+        );
+        assert_eq!(
+            login_command_for_mcp_url("http://localhost:3000/mcp/readonly"),
+            "npx --yes @nunu-ai/nunu-cli auth login --base-url 'http://localhost:3000'"
         );
     }
 }

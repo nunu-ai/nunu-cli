@@ -611,13 +611,15 @@ mod tests {
 
     #[test]
     fn builds_protected_resource_metadata_url() {
-        let resource = Url::parse("https://nunu.ai/mcp").expect("valid URL");
-        assert_eq!(
-            protected_resource_metadata_url(&resource)
-                .expect("metadata URL")
-                .as_str(),
-            "https://nunu.ai/.well-known/oauth-protected-resource/mcp"
-        );
+        for path in ["mcp", "mcp/readonly"] {
+            let resource = Url::parse(&format!("https://nunu.ai/{path}")).expect("valid URL");
+            assert_eq!(
+                protected_resource_metadata_url(&resource)
+                    .expect("metadata URL")
+                    .as_str(),
+                format!("https://nunu.ai/.well-known/oauth-protected-resource/{path}")
+            );
+        }
     }
 
     #[test]
