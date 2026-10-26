@@ -1,8 +1,15 @@
 # Changelog
 
-## [v0.1.32](https://github.com/nunu-ai/nunu-cli/compare/v0.1.31...75973ccaa5c269a071fe7ad2d02ff3377604f3a1) (2026-10-26)
+## [v0.1.33](https://github.com/nunu-ai/nunu-cli/compare/v0.1.32...382535897eef80426c80627aa5b0e3d2285bdf69) (2026-10-26)
 
-### Fixes
+### Features
+
+* readonly mcp flag
+([3825358](https://github.com/nunu-ai/nunu-cli/commit/382535897eef80426c80627aa5b0e3d2285bdf69))
+
+### [v0.1.32](https://github.com/nunu-ai/nunu-cli/compare/v0.1.31...v0.1.32) (2026-10-26)
+
+#### Fixes
 
 * correct stylization of 'nunu'
 ([75973cc](https://github.com/nunu-ai/nunu-cli/commit/75973ccaa5c269a071fe7ad2d02ff3377604f3a1))
