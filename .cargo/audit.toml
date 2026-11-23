@@ -4,4 +4,4 @@ enabled = false      # Warn for yanked crates in Cargo.lock (default: true)
 update_index = false # Auto-update the crates.io index (default: true)
 
 [advisories]
-ignore = ["RUSTSEC-2023-0071"]
+ignore = []
